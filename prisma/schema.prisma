@@ -1,0 +1,110 @@
+// Prisma schema for the CS2 Matchroom app.
+// SQLite does not support native enums, so role/status/team fields are plain
+// String columns constrained by the TS union types in src/lib/types.ts —
+// validate against those unions at every write boundary (server actions/routes).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id            String   @id @default(cuid())
+  steamId64     String   @unique
+  name          String
+  avatarUrl     String?
+  role          String   @default("PLAYER") // "ADMIN" | "HOST" | "PLAYER"
+  manualRating  Float?
+  createdAt     DateTime @default(now())
+
+  hostedRooms   Room[]       @relation("RoomHost")
+  roomPlayers   RoomPlayer[]
+}
+
+model Room {
+  id                String   @id @default(cuid())
+  code              String   @unique
+  label             String
+  hostUserId        String
+  host              User     @relation("RoomHost", fields: [hostUserId], references: [id])
+  status            String   @default("LOBBY") // LOBBY | VETO | READY | LIVE | COMPLETED | CANCELLED
+  format            String   @default("BO1") // BO1 | BO3 | BO5
+  mapPool           String   // JSON array of map strings
+  knifeRound        Boolean  @default(true)
+  overtimeEnabled   Boolean  @default(true)
+  minPlayersToStart Int      @default(10)
+  playersPerTeam    Int      @default(5)
+  createdAt         DateTime @default(now())
+
+  players RoomPlayer[]
+  veto    Veto?
+  match   Match?
+}
+
+model RoomPlayer {
+  id        String   @id @default(cuid())
+  roomId    String
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  team      String   @default("UNASSIGNED") // A | B | UNASSIGNED
+  isCaptain Boolean  @default(false)
+  isReady   Boolean  @default(false)
+  joinedAt  DateTime @default(now())
+
+  @@unique([roomId, userId])
+}
+
+model Veto {
+  id               String   @id @default(cuid())
+  roomId           String   @unique
+  room             Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  status           String   @default("NOT_STARTED") // NOT_STARTED | IN_PROGRESS | DONE
+  steps            String   @default("[]") // JSON array of {team, map, action} ban/pick log
+  finalMapList     String?  // JSON array of resolved map names, in play order
+  overriddenByHost Boolean  @default(false)
+  updatedAt        DateTime @updatedAt
+}
+
+model Match {
+  id                String   @id @default(cuid())
+  roomId            String   @unique
+  room              Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  matchzyMatchId    String   @unique
+  status            String   @default("LOADING") // LOADING | WARMUP | KNIFE | LIVE | PAUSED | COMPLETED | CANCELLED
+  currentMapIndex   Int      @default(0)
+  currentMap        String?
+  team1Score        Int      @default(0)
+  team2Score        Int      @default(0)
+  connectedPlayers  String   @default("[]") // JSON array of steamId64 currently connected
+  configJson        String   // the exact Get5-style JSON served to matchzy_loadmatch_url
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  events MatchEvent[]
+}
+
+model MatchEvent {
+  id         String   @id @default(cuid())
+  matchId    String
+  match      Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  eventType  String
+  payload    String   // raw JSON payload as received from MatchZy's webhook
+  receivedAt DateTime @default(now())
+
+  @@index([matchId])
+}
+
+// Singleton row (id always "singleton") holding admin-editable server settings.
+model ServerConfig {
+  id                    String  @id @default("singleton")
+  rconHost              String  @default("")
+  rconPort              Int     @default(27015)
+  rconPasswordEncrypted String  @default("")
+  webhookSharedSecret   String  @default("")
+  appPublicUrl          String  @default("")
+}

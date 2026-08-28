@@ -1,0 +1,17 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: "file:/app/data/db.sqlite"
+      APP_SECRET: "${APP_SECRET}"
+      STEAM_API_KEY: "${STEAM_API_KEY}"
+      APP_PUBLIC_URL: "${APP_PUBLIC_URL}"
+      LEETIFY_API_KEY: "${LEETIFY_API_KEY:-}"
+    volumes:
+      - data:/app/data
+
+volumes:
+  data:
