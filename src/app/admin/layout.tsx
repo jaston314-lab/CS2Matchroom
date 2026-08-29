@@ -6,14 +6,14 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   return (
     <div className="space-y-6">
-      <nav className="flex gap-4 text-sm border-b border-neutral-800 pb-3">
-        <Link href="/admin/users" className="text-neutral-300 hover:text-white">
+      <nav className="flex gap-5 text-sm border-b border-neutral-800 pb-3">
+        <Link href="/admin/users" className="text-neutral-300 hover:text-blue-400 transition-colors">
           Users
         </Link>
-        <Link href="/admin/rooms" className="text-neutral-300 hover:text-white">
+        <Link href="/admin/rooms" className="text-neutral-300 hover:text-blue-400 transition-colors">
           Rooms
         </Link>
-        <Link href="/admin/server" className="text-neutral-300 hover:text-white">
+        <Link href="/admin/server" className="text-neutral-300 hover:text-blue-400 transition-colors">
           Server config
         </Link>
       </nav>

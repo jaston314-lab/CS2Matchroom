@@ -1,6 +1,6 @@
 import { requireRole } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { saveServerConfigAction, testRconConnectionAction } from "./actions";
+import { saveServerConfigAction, testRconConnectionAction, regenerateInviteCodeAction } from "./actions";
 
 export default async function AdminServerPage({
   searchParams,
@@ -26,6 +26,26 @@ export default async function AdminServerPage({
       )}
       {params.testOk === "1" && <Banner tone="ok">Connected — server hostname: {params.testHostname}</Banner>}
       {params.testOk === "0" && <Banner tone="error">Connection failed: {params.testError}</Banner>}
+      {params.inviteRegenerated && <Banner tone="ok">Invite code regenerated.</Banner>}
+
+      <section className="rounded-xl border border-blue-800/60 bg-blue-950/10 p-4 space-y-2">
+        <h2 className="text-sm font-medium text-neutral-300">Invite code</h2>
+        <p className="text-xs text-neutral-500">
+          Required to create a brand-new account — existing members log back in freely. Hosts can
+          see this on the dashboard; regenerating invalidates it for anyone who hasn&apos;t signed
+          up yet.
+        </p>
+        <div className="flex items-center gap-3">
+          <span className="font-mono tracking-widest text-lg">
+            {config?.inviteCode || <span className="text-yellow-500 text-sm">Not set</span>}
+          </span>
+          <form action={regenerateInviteCodeAction}>
+            <button className="rounded-lg border border-neutral-700 px-3 py-1.5 text-sm hover:border-blue-500 transition-colors">
+              {config?.inviteCode ? "Regenerate" : "Generate"}
+            </button>
+          </form>
+        </div>
+      </section>
 
       <form action={saveServerConfigAction} className="space-y-4">
         <Field label="RCON host" name="rconHost" defaultValue={config?.rconHost ?? "192.168.100.80"} />
@@ -39,7 +59,7 @@ export default async function AdminServerPage({
             name="rconPassword"
             type="password"
             autoComplete="off"
-            className="w-full rounded bg-neutral-900 border border-neutral-700 px-3 py-2"
+            className="w-full rounded-lg bg-neutral-900 border border-neutral-700 px-3 py-2 focus:border-blue-500 focus:outline-none"
           />
         </div>
         <Field
@@ -58,14 +78,14 @@ export default async function AdminServerPage({
         <div className="flex gap-3 pt-2">
           <button
             type="submit"
-            className="rounded bg-blue-600 hover:bg-blue-500 px-4 py-2 text-white font-medium"
+            className="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-2 text-white font-medium transition-colors"
           >
             Save &amp; apply
           </button>
           <button
             type="submit"
             formAction={testRconConnectionAction}
-            className="rounded border border-neutral-700 px-4 py-2 hover:border-neutral-500"
+            className="rounded-lg border border-neutral-700 px-4 py-2 hover:border-blue-500 transition-colors"
           >
             Test RCON connection
           </button>
@@ -98,7 +118,7 @@ function Field({
         name={name}
         type={type}
         defaultValue={defaultValue}
-        className="w-full rounded bg-neutral-900 border border-neutral-700 px-3 py-2"
+        className="w-full rounded-lg bg-neutral-900 border border-neutral-700 px-3 py-2 focus:border-blue-500 focus:outline-none"
       />
       {hint && <p className="text-xs text-neutral-500 mt-1">{hint}</p>}
     </div>
@@ -107,9 +127,9 @@ function Field({
 
 function Banner({ tone, children }: { tone: "ok" | "warn" | "error"; children: React.ReactNode }) {
   const styles = {
-    ok: "border-green-800 bg-green-950 text-green-200",
-    warn: "border-yellow-800 bg-yellow-950 text-yellow-200",
-    error: "border-red-800 bg-red-950 text-red-200",
+    ok: "border-emerald-800 bg-emerald-950/60 text-emerald-200",
+    warn: "border-yellow-800 bg-yellow-950/60 text-yellow-200",
+    error: "border-red-800 bg-red-950/60 text-red-200",
   }[tone];
-  return <p className={`rounded border px-3 py-2 text-sm ${styles}`}>{children}</p>;
+  return <p className={`rounded-lg border px-3 py-2 text-sm ${styles}`}>{children}</p>;
 }

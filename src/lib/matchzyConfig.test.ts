@@ -13,6 +13,7 @@ function roomPlayer(userId: string, team: "A" | "B" | "UNASSIGNED", overrides: R
     user: user(userId, `Player ${userId}`),
     team,
     isCaptain: false,
+    isCoach: false,
     isReady: true,
     joinedAt: new Date(),
     ...overrides,
@@ -20,7 +21,17 @@ function roomPlayer(userId: string, team: "A" | "B" | "UNASSIGNED", overrides: R
 }
 
 const baseInput: BuildMatchConfigInput = {
-  room: { label: "Friday Night", format: "BO1", knifeRound: true, overtimeEnabled: true, playersPerTeam: 2 },
+  room: {
+    label: "Friday Night",
+    format: "BO1",
+    knifeRound: true,
+    overtimeEnabled: true,
+    playersPerTeam: 2,
+    coachesPerTeam: 1,
+    teamAName: "Team A",
+    teamBName: "Team B",
+    simulation: false,
+  },
   roomPlayers: [
     roomPlayer("1", "A") as never,
     roomPlayer("2", "A") as never,
@@ -34,10 +45,34 @@ const baseInput: BuildMatchConfigInput = {
 describe("buildMatchConfig", () => {
   it("builds team rosters keyed by steamId64", () => {
     const config = buildMatchConfig(baseInput);
-    expect(config.team1).toEqual({ name: "Friday Night — Team A", players: { "1": "Player 1", "2": "Player 2" } });
-    expect(config.team2).toEqual({ name: "Friday Night — Team B", players: { "3": "Player 3", "4": "Player 4" } });
+    expect(config.team1).toEqual({
+      name: "Team A",
+      players: { "1": "Player 1", "2": "Player 2" },
+      coaches: {},
+    });
+    expect(config.team2).toEqual({
+      name: "Team B",
+      players: { "3": "Player 3", "4": "Player 4" },
+      coaches: {},
+    });
     expect(config.maplist).toEqual(["de_mirage"]);
     expect(config.matchid).toBe("test-match-1");
+    expect(config.coaches_per_team).toBe(1);
+  });
+
+  it("puts a coach in the coaches map, excluded from the players map", () => {
+    const config = buildMatchConfig({
+      ...baseInput,
+      roomPlayers: [
+        ...baseInput.roomPlayers,
+        roomPlayer("5", "A", { isCoach: true }) as never,
+      ],
+    });
+    expect(config.team1).toEqual({
+      name: "Team A",
+      players: { "1": "Player 1", "2": "Player 2" },
+      coaches: { "5": "Player 5" },
+    });
   });
 
   it("uses side_type standard when knife round is enabled, no map_sides", () => {
@@ -60,5 +95,14 @@ describe("buildMatchConfig", () => {
     expect(() =>
       buildMatchConfig({ ...baseInput, room: { ...baseInput.room, format: "BO3" }, mapList: ["de_mirage"] }),
     ).toThrow(/requires 3/);
+  });
+
+  it("omits simulation fields by default, includes them when the room has simulation on", () => {
+    const off = buildMatchConfig(baseInput);
+    expect(off.simulation).toBeUndefined();
+
+    const on = buildMatchConfig({ ...baseInput, room: { ...baseInput.room, simulation: true } });
+    expect(on.simulation).toBe(true);
+    expect(on.simulation_timescale).toBe(5);
   });
 });

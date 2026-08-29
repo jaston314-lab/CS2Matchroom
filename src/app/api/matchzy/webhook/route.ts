@@ -50,20 +50,49 @@ export async function POST(request: NextRequest) {
   if (update.connectAdd) connectedPlayers.add(update.connectAdd);
   if (update.connectRemove) connectedPlayers.delete(update.connectRemove);
 
+  const finalTeam1Score = update.team1Score ?? match.team1Score;
+  const finalTeam2Score = update.team2Score ?? match.team2Score;
+  // Only credit wins/losses on the transition *into* COMPLETED — guards
+  // against a duplicate webhook delivery double-crediting everyone.
+  const justCompleted = update.status === "COMPLETED" && match.status !== "COMPLETED";
+  const winnerTeam: "A" | "B" | null = justCompleted
+    ? finalTeam1Score === finalTeam2Score
+      ? null // tie — shouldn't really happen with clinch_series, but don't credit anyone
+      : finalTeam1Score > finalTeam2Score
+        ? "A"
+        : "B"
+    : null;
+
   await db.match.update({
     where: { id: match.id },
     data: {
       status: update.status ?? match.status,
-      team1Score: update.team1Score ?? match.team1Score,
-      team2Score: update.team2Score ?? match.team2Score,
+      team1Score: finalTeam1Score,
+      team2Score: finalTeam2Score,
       currentMap: update.currentMap ?? match.currentMap,
       currentMapIndex: update.currentMapIndex ?? match.currentMapIndex,
       connectedPlayers: JSON.stringify([...connectedPlayers]),
+      winnerTeam: winnerTeam ?? undefined,
     },
   });
 
   if (update.status === "COMPLETED") {
     await db.room.update({ where: { id: match.roomId }, data: { status: "COMPLETED" } });
+  }
+
+  if (justCompleted && winnerTeam) {
+    const roomPlayers = await db.roomPlayer.findMany({
+      where: { roomId: match.roomId, isCoach: false, team: { in: ["A", "B"] } },
+    });
+    const loserTeam = winnerTeam === "A" ? "B" : "A";
+    await db.$transaction([
+      ...roomPlayers
+        .filter((p) => p.team === winnerTeam)
+        .map((p) => db.user.update({ where: { id: p.userId }, data: { wins: { increment: 1 } } })),
+      ...roomPlayers
+        .filter((p) => p.team === loserTeam)
+        .map((p) => db.user.update({ where: { id: p.userId }, data: { losses: { increment: 1 } } })),
+    ]);
   }
 
   return NextResponse.json({ ok: true, correlated: true });

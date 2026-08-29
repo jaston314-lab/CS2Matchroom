@@ -6,7 +6,7 @@ export const ROLES = ["ADMIN", "HOST", "PLAYER"] as const;
 export type Role = (typeof ROLES)[number];
 
 export const ROOM_STATUSES = [
-  "LOBBY",
+  "SETUP",
   "VETO",
   "READY",
   "LIVE",
@@ -36,6 +36,17 @@ export interface VetoStep {
   map: string;
   action: "ban";
 }
+
+export const DRAFT_STATUSES = ["NOT_STARTED", "IN_PROGRESS", "DONE"] as const;
+export type DraftStatus = (typeof DRAFT_STATUSES)[number];
+
+export interface DraftStep {
+  team: "A" | "B";
+  roomPlayerId: string;
+}
+
+export const TEAM_FORMATION_MODES = ["SELF_SELECT", "CAPTAIN_DRAFT"] as const;
+export type TeamFormationMode = (typeof TEAM_FORMATION_MODES)[number];
 
 export const MATCH_STATUSES = [
   "LOADING",

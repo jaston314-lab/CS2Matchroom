@@ -1,6 +1,3 @@
-"use client";
-
-import { useEffect, useState } from "react";
 import { mapLabel } from "@/lib/maps";
 
 interface MatchSnapshot {
@@ -12,48 +9,22 @@ interface MatchSnapshot {
   connectedPlayers: string[];
 }
 
-interface StatusResponse {
-  roomStatus: string;
-  match: MatchSnapshot | null;
-}
-
+/**
+ * Pure presentation — freshness comes from the whole dashboard page
+ * re-rendering via <AutoRefresh>, not from any fetching of its own.
+ */
 export function RoomLive({
-  code,
-  initialRoomStatus,
-  initialMatch,
+  match,
   players,
 }: {
-  code: string;
-  initialRoomStatus: string;
-  initialMatch: MatchSnapshot | null;
+  match: MatchSnapshot;
   players: { steamId64: string; name: string }[];
 }) {
-  const [data, setData] = useState<StatusResponse>({
-    roomStatus: initialRoomStatus,
-    match: initialMatch,
-  });
-
-  useEffect(() => {
-    if (data.roomStatus !== "LIVE") return;
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/rooms/${code}/status`, { cache: "no-store" });
-        if (res.ok) setData(await res.json());
-      } catch {
-        // transient network hiccup — just try again next tick
-      }
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [code, data.roomStatus]);
-
-  if (data.roomStatus !== "LIVE" || !data.match) return null;
-
-  const { match } = data;
   const nameFor = (steamId64: string) =>
     players.find((p) => p.steamId64 === steamId64)?.name ?? steamId64;
 
   return (
-    <section className="rounded border border-green-800 bg-green-950/40 p-4 space-y-3">
+    <section className="rounded-xl border border-emerald-800/60 bg-emerald-950/30 p-4 space-y-3">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-medium">Live — {match.status}</h2>
         {match.currentMap && (

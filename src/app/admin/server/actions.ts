@@ -5,6 +5,7 @@ import { requireRole } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { encrypt, decrypt } from "@/lib/crypto";
 import { applyServerConfig, testConnection } from "@/lib/rcon";
+import { generateInviteCode } from "@/lib/inviteCode";
 
 function redirectWithParams(params: Record<string, string>): never {
   const search = new URLSearchParams(params).toString();
@@ -63,6 +64,17 @@ export async function saveServerConfigAction(formData: FormData): Promise<void> 
     redirectWithParams({ saved: "1", applyError: (error as Error).message });
   }
   redirectWithParams({ saved: "1" });
+}
+
+export async function regenerateInviteCodeAction(): Promise<void> {
+  await requireRole(["ADMIN"]);
+  const code = generateInviteCode();
+  await db.serverConfig.upsert({
+    where: { id: "singleton" },
+    update: { inviteCode: code },
+    create: { id: "singleton", inviteCode: code },
+  });
+  redirectWithParams({ inviteRegenerated: "1" });
 }
 
 export async function testRconConnectionAction(formData: FormData): Promise<void> {

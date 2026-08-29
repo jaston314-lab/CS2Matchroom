@@ -7,6 +7,10 @@ import { type Role, isRole } from "@/lib/types";
 
 export interface SessionData {
   steamId64?: string;
+  /** Set on the callback route when a brand-new SteamID shows up (and
+   * it's not the bootstrap admin) — the /invite page reads this to know
+   * who's asking, without having created their account yet. */
+  pendingSteamId64?: string;
 }
 
 function sessionOptions(): SessionOptions {

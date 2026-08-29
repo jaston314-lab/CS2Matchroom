@@ -4,7 +4,18 @@ import { mapsRequiredForFormat, type Format } from "@/lib/types";
 type RoomPlayerWithUser = RoomPlayer & { user: User };
 
 export interface BuildMatchConfigInput {
-  room: Pick<Room, "label" | "format" | "knifeRound" | "overtimeEnabled" | "playersPerTeam">;
+  room: Pick<
+    Room,
+    | "label"
+    | "format"
+    | "knifeRound"
+    | "overtimeEnabled"
+    | "playersPerTeam"
+    | "coachesPerTeam"
+    | "teamAName"
+    | "teamBName"
+    | "simulation"
+  >;
   roomPlayers: RoomPlayerWithUser[];
   mapList: string[];
   matchzyMatchId: string;
@@ -13,7 +24,14 @@ export interface BuildMatchConfigInput {
 /** SteamID64 -> display name, for the players a given team roster needs. */
 function playerMap(players: RoomPlayerWithUser[], team: "A" | "B"): Record<string, string> {
   return Object.fromEntries(
-    players.filter((p) => p.team === team).map((p) => [p.user.steamId64, p.user.name]),
+    players.filter((p) => p.team === team && !p.isCoach).map((p) => [p.user.steamId64, p.user.name]),
+  );
+}
+
+/** SteamID64 -> display name, for the coach(es) assigned to a given team. */
+function coachMap(players: RoomPlayerWithUser[], team: "A" | "B"): Record<string, string> {
+  return Object.fromEntries(
+    players.filter((p) => p.team === team && p.isCoach).map((p) => [p.user.steamId64, p.user.name]),
   );
 }
 
@@ -36,12 +54,21 @@ export function buildMatchConfig(input: BuildMatchConfigInput): Record<string, u
     match_title: room.label,
     num_maps: numMaps,
     players_per_team: room.playersPerTeam,
+    coaches_per_team: room.coachesPerTeam,
     min_players_to_ready: room.playersPerTeam,
     clinch_series: true,
     veto_first: "random",
     skip_veto: true, // map order is already resolved by our own veto/override UI
-    team1: { name: `${room.label} — Team A`, players: playerMap(roomPlayers, "A") },
-    team2: { name: `${room.label} — Team B`, players: playerMap(roomPlayers, "B") },
+    team1: {
+      name: room.teamAName,
+      players: playerMap(roomPlayers, "A"),
+      coaches: coachMap(roomPlayers, "A"),
+    },
+    team2: {
+      name: room.teamBName,
+      players: playerMap(roomPlayers, "B"),
+      coaches: coachMap(roomPlayers, "B"),
+    },
     maplist: mapList,
     cvars: {
       hostname: `${room.label} — CS2 Matchroom`,
@@ -55,6 +82,14 @@ export function buildMatchConfig(input: BuildMatchConfigInput): Record<string, u
     config.side_type = "never_knife";
     // Deterministic alternating sides per map since there's no knife round.
     config.map_sides = mapList.map((_, i) => (i % 2 === 0 ? "team1_ct" : "team2_ct"));
+  }
+
+  if (room.simulation) {
+    // MatchZy Enhanced test feature: spawns bots mapped to the configured
+    // SteamIDs and auto-plays the whole match, so the RCON/webhook
+    // pipeline can be exercised without real players connecting.
+    config.simulation = true;
+    config.simulation_timescale = 5;
   }
 
   return config;

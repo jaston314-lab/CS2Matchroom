@@ -21,27 +21,45 @@ model User {
   manualRating  Float?
   createdAt     DateTime @default(now())
 
+  wins          Int          @default(0)
+  losses        Int          @default(0)
+  // Placeholder player created by "fill with bots" in test mode — never
+  // logs in, excluded from the Players Lounge leaderboard.
+  isBot         Boolean      @default(false)
+
   hostedRooms   Room[]       @relation("RoomHost")
   roomPlayers   RoomPlayer[]
 }
 
+// At most one non-terminal (status not COMPLETED/CANCELLED) Room should
+// exist at a time — enforced in the setup action, not the schema. Past
+// rooms stay around for Players Lounge history; there's no more join code,
+// since access is gated at signup by ServerConfig.inviteCode instead.
 model Room {
   id                String   @id @default(cuid())
-  code              String   @unique
   label             String
   hostUserId        String
   host              User     @relation("RoomHost", fields: [hostUserId], references: [id])
-  status            String   @default("LOBBY") // LOBBY | VETO | READY | LIVE | COMPLETED | CANCELLED
+  status            String   @default("SETUP") // SETUP | VETO | READY | LIVE | COMPLETED | CANCELLED
   format            String   @default("BO1") // BO1 | BO3 | BO5
   mapPool           String   // JSON array of map strings
   knifeRound        Boolean  @default(true)
   overtimeEnabled   Boolean  @default(true)
   minPlayersToStart Int      @default(10)
   playersPerTeam    Int      @default(5)
+  mode              String   @default("SELF_SELECT") // SELF_SELECT | CAPTAIN_DRAFT
+  teamAName         String   @default("Team A")
+  teamBName         String   @default("Team B")
+  // MatchZy Enhanced "simulation mode" — spawns bots mapped to the
+  // configured SteamIDs and auto-plays the match, for testing the
+  // RCON/webhook pipeline without needing real players connected.
+  simulation        Boolean  @default(false)
+  coachesPerTeam    Int      @default(1)
   createdAt         DateTime @default(now())
 
   players RoomPlayer[]
   veto    Veto?
+  draft   Draft?
   match   Match?
 }
 
@@ -53,6 +71,7 @@ model RoomPlayer {
   user      User     @relation(fields: [userId], references: [id])
   team      String   @default("UNASSIGNED") // A | B | UNASSIGNED
   isCaptain Boolean  @default(false)
+  isCoach   Boolean  @default(false) // mutually exclusive with isCaptain, enforced in the toggle actions
   isReady   Boolean  @default(false)
   joinedAt  DateTime @default(now())
 
@@ -70,6 +89,16 @@ model Veto {
   updatedAt        DateTime @updatedAt
 }
 
+// Only relevant when Room.mode === "CAPTAIN_DRAFT". Parallel shape to Veto.
+model Draft {
+  id        String   @id @default(cuid())
+  roomId    String   @unique
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  status    String   @default("NOT_STARTED") // NOT_STARTED | IN_PROGRESS | DONE
+  steps     String   @default("[]") // JSON array of {team, roomPlayerId} pick log
+  updatedAt DateTime @updatedAt
+}
+
 model Match {
   id                String   @id @default(cuid())
   roomId            String   @unique
@@ -80,6 +109,7 @@ model Match {
   currentMap        String?
   team1Score        Int      @default(0)
   team2Score        Int      @default(0)
+  winnerTeam        String?  // "A" | "B" — set once, when wins/losses are credited
   connectedPlayers  String   @default("[]") // JSON array of steamId64 currently connected
   configJson        String   // the exact Get5-style JSON served to matchzy_loadmatch_url
   createdAt         DateTime @default(now())
@@ -107,4 +137,7 @@ model ServerConfig {
   rconPasswordEncrypted String  @default("")
   webhookSharedSecret   String  @default("")
   appPublicUrl          String  @default("")
+  // Site-wide signup gate. Required only to create a brand-new account —
+  // existing users log back in freely. Empty means "invites not open yet".
+  inviteCode            String  @default("")
 }

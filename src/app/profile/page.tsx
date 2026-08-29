@@ -9,7 +9,7 @@ export default async function ProfilePage() {
       <div className="flex items-center gap-4">
         {user.avatarUrl && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={user.avatarUrl} alt="" className="w-16 h-16 rounded" />
+          <img src={user.avatarUrl} alt="" className="w-16 h-16 rounded-xl ring-1 ring-neutral-700" />
         )}
         <div>
           <h1 className="text-xl font-semibold">{user.name}</h1>
@@ -33,11 +33,11 @@ export default async function ProfilePage() {
             max={40000}
             defaultValue={user.manualRating ?? ""}
             placeholder="e.g. 15000"
-            className="flex-1 rounded bg-neutral-900 border border-neutral-700 px-3 py-2"
+            className="flex-1 rounded-lg bg-neutral-900 border border-neutral-700 px-3 py-2 focus:border-blue-500 focus:outline-none"
           />
           <button
             type="submit"
-            className="rounded bg-blue-600 hover:bg-blue-500 px-4 py-2 text-white font-medium"
+            className="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-2 text-white font-medium transition-colors"
           >
             Save
           </button>

@@ -28,27 +28,41 @@ export async function GET(request: NextRequest) {
     return redirectTo("/login?error=not_authenticated");
   }
 
-  const profile = await fetchSteamProfile(steamId64);
-  // Bootstrap: whoever logs in first becomes admin, so there's no manual
-  // DB edit needed on a fresh install. Tiny race if two people somehow log
-  // in for the very first time simultaneously — not worth guarding against
-  // for a small friend-group app.
-  const isFirstUserEver = (await db.user.count()) === 0;
-
-  const user = await db.user.upsert({
-    where: { steamId64 },
-    update: { name: profile.name, avatarUrl: profile.avatarUrl },
-    create: {
-      steamId64,
-      name: profile.name,
-      avatarUrl: profile.avatarUrl,
-      role: isFirstUserEver ? "ADMIN" : "PLAYER",
-    },
-  });
-
+  const existing = await db.user.findUnique({ where: { steamId64 } });
   const session = await getSession();
-  session.steamId64 = user.steamId64;
-  await session.save();
 
-  return redirectTo("/dashboard");
+  if (existing) {
+    const profile = await fetchSteamProfile(steamId64);
+    await db.user.update({
+      where: { steamId64 },
+      data: { name: profile.name, avatarUrl: profile.avatarUrl },
+    });
+    session.steamId64 = steamId64;
+    session.pendingSteamId64 = undefined;
+    await session.save();
+    return redirectTo("/dashboard");
+  }
+
+  // Bootstrap: whoever logs in first becomes admin, so there's no manual
+  // DB edit needed on a fresh install, and no invite code is required for
+  // it. Tiny race if two people somehow log in for the very first time
+  // simultaneously — not worth guarding against for a small friend-group app.
+  const isFirstUserEver = (await db.user.count()) === 0;
+  if (isFirstUserEver) {
+    const profile = await fetchSteamProfile(steamId64);
+    await db.user.create({
+      data: { steamId64, name: profile.name, avatarUrl: profile.avatarUrl, role: "ADMIN" },
+    });
+    session.steamId64 = steamId64;
+    session.pendingSteamId64 = undefined;
+    await session.save();
+    return redirectTo("/dashboard");
+  }
+
+  // Unknown SteamID, not the bootstrap case — don't create an account yet,
+  // send them to enter an invite code first.
+  session.pendingSteamId64 = steamId64;
+  session.steamId64 = undefined;
+  await session.save();
+  return redirectTo("/invite");
 }

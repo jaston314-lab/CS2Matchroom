@@ -5,6 +5,31 @@
   --font-mono: var(--font-geist-mono);
 }
 
+:root {
+  color-scheme: dark;
+}
+
 body {
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  background: #06070a;
+  color: #e7e9ee;
+}
+
+/* Subtle radial glow for hero/auth pages — pure CSS, no assets. */
+.hero-glow {
+  position: relative;
+  isolation: isolate;
+}
+.hero-glow::before {
+  content: "";
+  position: absolute;
+  inset: -20% -20% auto -20%;
+  height: 32rem;
+  background: radial-gradient(closest-side, rgba(59, 130, 246, 0.22), transparent 70%);
+  z-index: -1;
+  pointer-events: none;
+}
+
+::selection {
+  background: rgba(59, 130, 246, 0.35);
 }
