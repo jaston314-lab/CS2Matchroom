@@ -10,9 +10,6 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         <Link href="/admin/users" className="text-neutral-300 hover:text-blue-400 transition-colors">
           Users
         </Link>
-        <Link href="/admin/rooms" className="text-neutral-300 hover:text-blue-400 transition-colors">
-          Rooms
-        </Link>
         <Link href="/admin/server" className="text-neutral-300 hover:text-blue-400 transition-colors">
           Server config
         </Link>

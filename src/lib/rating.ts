@@ -1,25 +1,36 @@
 import "server-only";
 
 const LEETIFY_BASE_URL = "https://api-public.cs-prod.leetify.com";
+const CACHE_TTL_MS = 5 * 60_000;
 
 interface LeetifyProfileResponse {
-  privacy_mode: "public" | "private";
-  ranks: { premier: number | null };
+  privacy_mode?: "public" | "private";
+  ranks?: { premier: number | null };
+  error?: string;
 }
 
-/**
- * Looks up a player's CS2 Premier rating from Leetify's public API
- * (GET /v3/profile?steamId=...). Returns null if the player has no
- * Leetify data, their profile is private, or the call fails/times out —
- * callers should fall back to the player's manually-entered rating.
- *
- * Per Leetify's API guidelines this value must not be persisted — always
- * fetch fresh, never cache in the DB.
- */
-export async function fetchLeetifyRating(steamId64: string): Promise<number | null> {
+interface CacheEntry {
+  value: number | null;
+  expires: number;
+}
+
+// In-memory only, never written to the DB — Leetify's developer guidelines
+// ask that data from their API not be stored, only fetched fresh each time
+// (https://leetify.com/blog/leetify-api-developer-guidelines/, #6). This
+// cache doesn't violate that: it's ephemeral, resets on every server
+// restart, and self-expires — it exists purely so the matchroom page's 3s
+// AutoRefresh poll (see AutoRefresh.tsx) doesn't re-fetch every player's
+// rating from Leetify on every single tick, which is what actually got us
+// rate-limited.
+const cache = new Map<string, CacheEntry>();
+
+async function fetchLeetifyRatingUncached(steamId64: string): Promise<number | null> {
   try {
     const url = new URL("/v3/profile", LEETIFY_BASE_URL);
-    url.searchParams.set("steamId", steamId64);
+    // The wire format is steam64_id, not steamId — confirmed against
+    // Leetify's actual API (their own JS SDK's `steamId` input param gets
+    // translated to this before being sent).
+    url.searchParams.set("steam64_id", steamId64);
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5000);
@@ -37,11 +48,27 @@ export async function fetchLeetifyRating(steamId64: string): Promise<number | nu
 
     if (!res.ok) return null;
     const data = (await res.json()) as LeetifyProfileResponse;
-    if (data.privacy_mode === "private") return null;
+    if (data.error || data.privacy_mode === "private") return null;
     return data.ranks?.premier ?? null;
   } catch {
     return null; // network error, timeout, malformed response — treat as "no data"
   }
+}
+
+/**
+ * Looks up a player's CS2 Premier rating from Leetify's public API
+ * (GET /v3/profile?steam64_id=...). Returns null if the player has no
+ * Leetify data, their profile is private, or the call fails/times out —
+ * callers should fall back to the player's manually-entered rating.
+ */
+export async function fetchLeetifyRating(steamId64: string): Promise<number | null> {
+  const now = Date.now();
+  const cached = cache.get(steamId64);
+  if (cached && cached.expires > now) return cached.value;
+
+  const value = await fetchLeetifyRatingUncached(steamId64);
+  cache.set(steamId64, { value, expires: now + CACHE_TTL_MS });
+  return value;
 }
 
 export interface RatedPlayer {

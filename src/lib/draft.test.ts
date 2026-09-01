@@ -3,70 +3,61 @@ import { applyPick, startDraft } from "./draft";
 
 describe("draft", () => {
   it("resolves immediately when the pool is empty", () => {
-    const state = startDraft([], "A", 5);
+    const state = startDraft([], "A");
     expect(state.done).toBe(true);
     expect(state.nextTeam).toBeNull();
   });
 
-  it("alternates picks starting with the given team", () => {
+  it("alternates picks starting with the given team until the pool empties", () => {
     const pool = ["p1", "p2", "p3", "p4"];
-    let state = startDraft(pool, "A", 2);
+    let state = startDraft(pool, "A");
     expect(state.nextTeam).toBe("A");
 
-    state = applyPick(state, "A", "p1", 2);
+    state = applyPick(state, "A", "p1", "A");
     expect(state.nextTeam).toBe("B");
     expect(state.pool).not.toContain("p1");
 
-    state = applyPick(state, "B", "p2", 2);
+    state = applyPick(state, "B", "p2", "A");
     expect(state.nextTeam).toBe("A");
     expect(state.done).toBe(false);
 
-    state = applyPick(state, "A", "p3", 2);
+    state = applyPick(state, "A", "p3", "A");
     expect(state.nextTeam).toBe("B");
 
-    state = applyPick(state, "B", "p4", 2);
+    state = applyPick(state, "B", "p4", "A");
     expect(state.done).toBe(true);
     expect(state.nextTeam).toBeNull();
     expect(state.pool).toHaveLength(0);
   });
 
-  it("keeps a still-open team picking once the other team is full", () => {
-    // 6 players, target 2 per team — team A fills after 2 picks, team B
-    // should keep getting turns for the remaining 2 players in the pool.
-    const pool = ["p1", "p2", "p3", "p4", "p5", "p6"];
-    let state = startDraft(pool, "A", 2);
-
-    state = applyPick(state, "A", "p1", 2); // A: 1
-    state = applyPick(state, "B", "p2", 2); // B: 1
-    state = applyPick(state, "A", "p3", 2); // A: 2 — now full
-    expect(state.nextTeam).toBe("B");
-
-    state = applyPick(state, "B", "p4", 2); // B: 2 — now full too
+  it("produces uneven teams when the pool doesn't split evenly — no fixed target anymore", () => {
+    // 7 players (odd) — with no per-team cap, alternation just keeps going
+    // until the pool is empty, so team A (which picks first) ends up with
+    // one more than team B.
+    const pool = ["p1", "p2", "p3", "p4", "p5", "p6", "p7"];
+    let state = startDraft(pool, "A");
+    for (const id of pool) {
+      state = applyPick(state, state.nextTeam!, id, "A");
+    }
     expect(state.done).toBe(true);
-    expect(state.pool).toEqual(["p5", "p6"]); // leftover, undrafted
-  });
-
-  it("finishes early if the pool runs out before either team is full", () => {
-    const state0 = startDraft(["p1"], "A", 5);
-    const state1 = applyPick(state0, "A", "p1", 5);
-    expect(state1.done).toBe(true);
-    expect(state1.nextTeam).toBeNull();
+    expect(state.steps.filter((s) => s.team === "A")).toHaveLength(4);
+    expect(state.steps.filter((s) => s.team === "B")).toHaveLength(3);
   });
 
   it("rejects a pick when it's not that team's turn", () => {
-    const state = startDraft(["p1", "p2"], "A", 5);
-    expect(() => applyPick(state, "B", "p1", 5)).toThrow(/turn/);
+    const state = startDraft(["p1", "p2"], "A");
+    expect(() => applyPick(state, "B", "p1", "A")).toThrow(/turn/);
   });
 
   it("rejects picking a player who isn't in the pool", () => {
-    const state = startDraft(["p1", "p2"], "A", 5);
-    expect(() => applyPick(state, "A", "ghost", 5)).toThrow(/isn't available/);
+    const state = startDraft(["p1", "p2"], "A");
+    expect(() => applyPick(state, "A", "ghost", "A")).toThrow(/isn't available/);
   });
 
   it("rejects further picks once the draft is done", () => {
-    let state = startDraft(["p1"], "A", 1);
-    state = applyPick(state, "A", "p1", 1);
+    let state = startDraft(["p1"], "A");
+    state = applyPick(state, "A", "p1", "A");
     expect(state.done).toBe(true);
-    expect(() => applyPick(state, "B", "p1", 1)).toThrow(/already complete/);
+    expect(() => applyPick(state, "B", "p1", "A")).toThrow(/already complete/);
   });
 });

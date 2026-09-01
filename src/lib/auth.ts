@@ -75,6 +75,6 @@ export async function requireUser(): Promise<CurrentUser> {
 /** For Server Components/pages: redirects if authenticated but wrong role. */
 export async function requireRole(roles: Role[]): Promise<CurrentUser> {
   const user = await requireUser();
-  if (!roles.includes(user.role)) redirect("/dashboard");
+  if (!roles.includes(user.role)) redirect("/matchroom");
   return user;
 }

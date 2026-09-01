@@ -6,15 +6,7 @@ type RoomPlayerWithUser = RoomPlayer & { user: User };
 export interface BuildMatchConfigInput {
   room: Pick<
     Room,
-    | "label"
-    | "format"
-    | "knifeRound"
-    | "overtimeEnabled"
-    | "playersPerTeam"
-    | "coachesPerTeam"
-    | "teamAName"
-    | "teamBName"
-    | "simulation"
+    "label" | "format" | "knifeRound" | "overtimeEnabled" | "teamAName" | "teamBName" | "simulation"
   >;
   roomPlayers: RoomPlayerWithUser[];
   mapList: string[];
@@ -49,13 +41,25 @@ export function buildMatchConfig(input: BuildMatchConfigInput): Record<string, u
     throw new Error(`${format} requires ${numMaps} map(s), got ${mapList.length}`);
   }
 
+  // Team size isn't a configured setting — it's whatever actually showed
+  // up and readied. MatchZy still wants a single "how many players make a
+  // full team" number for its own ready-check, so use the larger of the
+  // two real rosters (an uneven match, e.g. 4v3, just means team B's
+  // "full" is reached at 3).
+  const playersA = roomPlayers.filter((p) => p.team === "A" && !p.isCoach).length;
+  const playersB = roomPlayers.filter((p) => p.team === "B" && !p.isCoach).length;
+  const playersPerTeam = Math.max(playersA, playersB, 1);
+  const coachesA = roomPlayers.filter((p) => p.team === "A" && p.isCoach).length;
+  const coachesB = roomPlayers.filter((p) => p.team === "B" && p.isCoach).length;
+  const coachesPerTeam = Math.max(coachesA, coachesB);
+
   const config: Record<string, unknown> = {
     matchid: matchzyMatchId,
     match_title: room.label,
     num_maps: numMaps,
-    players_per_team: room.playersPerTeam,
-    coaches_per_team: room.coachesPerTeam,
-    min_players_to_ready: room.playersPerTeam,
+    players_per_team: playersPerTeam,
+    coaches_per_team: coachesPerTeam,
+    min_players_to_ready: playersPerTeam,
     clinch_series: true,
     veto_first: "random",
     skip_veto: true, // map order is already resolved by our own veto/override UI

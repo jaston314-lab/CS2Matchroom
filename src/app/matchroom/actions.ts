@@ -14,6 +14,7 @@ import {
   type DraftStep,
 } from "@/lib/types";
 import { AVAILABLE_MAPS } from "@/lib/maps";
+import { DEFAULT_ROOM_SETTINGS } from "@/lib/roomDefaults";
 import { startVeto, applyBan } from "@/lib/veto";
 import { startDraft, applyPick, computeNextTeam } from "@/lib/draft";
 import { balanceTeams, resolveRatingsForRoom, type BalanceEntry } from "@/lib/rating";
@@ -46,8 +47,8 @@ async function claimHost(roomId: string, user: CurrentUser) {
   await db.room.update({ where: { id: roomId }, data: { hostUserId: user.id } });
 }
 
-function revalidateDashboard() {
-  revalidatePath("/dashboard");
+function revalidateMatchroom() {
+  revalidatePath("/matchroom");
 }
 
 async function startVetoForRoom(room: Pick<Room, "id" | "mapPool" | "format">) {
@@ -90,10 +91,11 @@ export async function updateSettingsAction(formData: FormData): Promise<void> {
   const mapPool = formData.getAll("mapPool").map(String);
   const knifeRound = formData.get("knifeRound") === "on";
   const overtimeEnabled = formData.get("overtimeEnabled") === "on";
-  const minPlayersToStart = Number(formData.get("minPlayersToStart") ?? 10);
-  const playersPerTeam = Number(formData.get("playersPerTeam") ?? 5);
-  const coachesPerTeam = Number(formData.get("coachesPerTeam") ?? 1);
-  const simulation = formData.get("simulation") === "on";
+  // Test mode is admin-only in the UI — a host's form submission omits the
+  // checkbox entirely (can't see it), which must NOT be read as "turn it
+  // off". Only touch this field when the submitter is actually an admin.
+  const canSetSimulation = user.role === "ADMIN" && formData.get("canSetSimulation") === "1";
+  const simulation = canSetSimulation ? formData.get("simulation") === "on" : undefined;
 
   if (!label) throw new Error("Match name is required");
   if (!(FORMATS as readonly string[]).includes(formatRaw)) throw new Error("Invalid format");
@@ -107,15 +109,6 @@ export async function updateSettingsAction(formData: FormData): Promise<void> {
   if (cleanPool.length < required) {
     throw new Error(`Pick at least ${required} map(s) for ${format}`);
   }
-  if (!Number.isInteger(minPlayersToStart) || minPlayersToStart < 2 || minPlayersToStart > 20) {
-    throw new Error("Min players to start must be between 2 and 20");
-  }
-  if (!Number.isInteger(playersPerTeam) || playersPerTeam < 1 || playersPerTeam > 10) {
-    throw new Error("Players per team must be between 1 and 10");
-  }
-  if (!Number.isInteger(coachesPerTeam) || coachesPerTeam < 0 || coachesPerTeam > 2) {
-    throw new Error("Coaches per team must be between 0 and 2");
-  }
 
   await db.room.update({
     where: { id: room.id },
@@ -126,21 +119,37 @@ export async function updateSettingsAction(formData: FormData): Promise<void> {
       mapPool: JSON.stringify(cleanPool),
       knifeRound,
       overtimeEnabled,
-      minPlayersToStart,
-      playersPerTeam,
-      coachesPerTeam,
       simulation,
       hostUserId: user.id,
     },
   });
-  revalidateDashboard();
+  revalidateMatchroom();
+}
+
+export async function resetSettingsAction(): Promise<void> {
+  const user = await requireUser();
+  assertCanManage(user);
+  const room = await getActiveRoom();
+  if (room.status !== "SETUP") {
+    throw new Error("Settings lock once teams start readying up");
+  }
+
+  await db.room.update({
+    where: { id: room.id },
+    data: {
+      ...DEFAULT_ROOM_SETTINGS,
+      mapPool: JSON.stringify(DEFAULT_ROOM_SETTINGS.mapPool),
+      hostUserId: user.id,
+    },
+  });
+  revalidateMatchroom();
 }
 
 export async function leaveLobby(): Promise<void> {
   const user = await requireUser();
   const room = await getActiveRoom();
   await db.roomPlayer.deleteMany({ where: { roomId: room.id, userId: user.id } });
-  revalidateDashboard();
+  revalidateMatchroom();
 }
 
 export async function setTeam(formData: FormData): Promise<void> {
@@ -153,11 +162,17 @@ export async function setTeam(formData: FormData): Promise<void> {
   if (room.status !== "SETUP") {
     throw new Error("Teams are locked once ready-up is complete");
   }
+
+  // First player onto an empty team becomes its captain. Switching teams
+  // always drops whatever captain/coach status you held on your previous
+  // team, so it can't linger stuck on the wrong side (or in the pool).
+  const isFirstOnTeam = (team === "A" || team === "B") && !room.players.some((p) => p.team === team);
+
   await db.roomPlayer.update({
     where: { roomId_userId: { roomId: room.id, userId: user.id } },
-    data: { team },
+    data: { team, isCaptain: isFirstOnTeam, isCoach: false },
   });
-  revalidateDashboard();
+  revalidateMatchroom();
 }
 
 /** Host/admin can rename either team; a captain can rename only their own. */
@@ -184,31 +199,16 @@ export async function renameTeamAction(formData: FormData): Promise<void> {
     where: { id: room.id },
     data: team === "A" ? { teamAName: name } : { teamBName: name },
   });
-  revalidateDashboard();
+  revalidateMatchroom();
 }
 
 /**
- * Once both teams have enough ready players, advance out of SETUP: jump
- * straight to READY if maps were already host-overridden, otherwise
- * auto-start the veto. Shared by setReady and the test-mode bulk-ready
- * shortcut below.
+ * Ready-up is just a signal for the host to look at — it's not what moves
+ * the room out of SETUP. Team size isn't a configured setting, so there's
+ * no fixed target to auto-detect "everyone's here" against; the host
+ * decides when to press Start (see startVetoAction) once they're happy
+ * with however the teams have shaken out, even/uneven, 1v1 or 5v5.
  */
-async function maybeAdvancePastSetup(room: Pick<Room, "id" | "status" | "playersPerTeam" | "mapPool" | "format">) {
-  if (room.status !== "SETUP") return;
-  const players = await db.roomPlayer.findMany({ where: { roomId: room.id } });
-  const readyA = players.filter((p) => p.team === "A" && p.isReady && !p.isCoach).length;
-  const readyB = players.filter((p) => p.team === "B" && p.isReady && !p.isCoach).length;
-  if (readyA >= room.playersPerTeam && readyB >= room.playersPerTeam) {
-    const veto = await db.veto.findUnique({ where: { roomId: room.id } });
-    if (veto?.finalMapList) {
-      // Maps were already host-overridden before everyone readied up.
-      await db.room.update({ where: { id: room.id }, data: { status: "READY" } });
-    } else if (!veto) {
-      await startVetoForRoom(room);
-    }
-  }
-}
-
 export async function setReady(formData: FormData): Promise<void> {
   const user = await requireUser();
   const ready = formData.get("ready") === "true";
@@ -217,9 +217,7 @@ export async function setReady(formData: FormData): Promise<void> {
     where: { roomId_userId: { roomId: room.id, userId: user.id } },
     data: { isReady: ready },
   });
-
-  await maybeAdvancePastSetup(room);
-  revalidateDashboard();
+  revalidateMatchroom();
 }
 
 /**
@@ -238,6 +236,11 @@ function generateFakeSteamId(): string {
     .padStart(17, "0");
 }
 
+// Team size isn't a configured setting anymore, but this test-mode
+// shortcut still needs *some* target to fill toward — a standard 5v5 is
+// the obvious "give me a full test match" default.
+const TEST_MODE_PLAYERS_PER_TEAM = 5;
+
 export async function readyUpAllAction(): Promise<void> {
   const user = await requireUser();
   assertCanManage(user);
@@ -252,19 +255,30 @@ export async function readyUpAllAction(): Promise<void> {
   // MatchZy just spawns bots representing whatever SteamIDs are configured.
   const countA = room.players.filter((p) => p.team === "A" && !p.isCoach).length;
   const countB = room.players.filter((p) => p.team === "B" && !p.isCoach).length;
-  const neededA = Math.max(0, room.playersPerTeam - countA);
-  const neededB = Math.max(0, room.playersPerTeam - countB);
+  const neededA = Math.max(0, TEST_MODE_PLAYERS_PER_TEAM - countA);
+  const neededB = Math.max(0, TEST_MODE_PLAYERS_PER_TEAM - countB);
 
-  let botIndex = (await db.user.count({ where: { isBot: true } })) + 1;
   const slots: ("A" | "B")[] = [
     ...Array(neededA).fill("A" as const),
     ...Array(neededB).fill("B" as const),
   ];
-  for (const team of slots) {
-    const bot = await db.user.create({
-      data: { steamId64: generateFakeSteamId(), name: `Bot ${botIndex}`, isBot: true },
-    });
-    botIndex++;
+
+  // Reuse bots left over from earlier test rooms (they're not tied to
+  // *this* room yet) instead of always minting new User rows — otherwise
+  // every test run permanently adds 9-10 more bot accounts.
+  const reusableBots = await db.user.findMany({
+    where: { isBot: true, roomPlayers: { none: { roomId: room.id } } },
+    take: slots.length,
+  });
+
+  let botIndex = (await db.user.count({ where: { isBot: true } })) + 1;
+  for (let i = 0; i < slots.length; i++) {
+    const team = slots[i];
+    const bot =
+      reusableBots[i] ??
+      (await db.user.create({
+        data: { steamId64: generateFakeSteamId(), name: `Bot ${botIndex++}`, isBot: true },
+      }));
     await db.roomPlayer.create({
       data: { roomId: room.id, userId: bot.id, team, isReady: true },
     });
@@ -275,8 +289,11 @@ export async function readyUpAllAction(): Promise<void> {
     data: { isReady: true },
   });
 
-  await maybeAdvancePastSetup(room);
-  revalidateDashboard();
+  // This single click is the host's explicit "start" trigger for test
+  // mode — same as pressing the real Start-veto button, just bundled with
+  // the fill/ready step for convenience.
+  await startVetoForRoom(room);
+  revalidateMatchroom();
 }
 
 export async function toggleCaptain(formData: FormData): Promise<void> {
@@ -304,7 +321,7 @@ export async function toggleCaptain(formData: FormData): Promise<void> {
     });
   });
   await claimHost(room.id, user);
-  revalidateDashboard();
+  revalidateMatchroom();
 }
 
 export async function toggleCoach(formData: FormData): Promise<void> {
@@ -318,19 +335,12 @@ export async function toggleCoach(formData: FormData): Promise<void> {
     throw new Error("Player must be on a team to be made coach");
   }
 
-  if (!target.isCoach) {
-    const currentCoaches = room.players.filter((p) => p.team === target.team && p.isCoach).length;
-    if (currentCoaches >= room.coachesPerTeam) {
-      throw new Error(`Team ${target.team} already has ${room.coachesPerTeam} coach(es)`);
-    }
-  }
-
   await db.roomPlayer.update({
     where: { id: target.id },
     data: { isCoach: !target.isCoach, isCaptain: false }, // captain/coach are mutually exclusive
   });
   await claimHost(room.id, user);
-  revalidateDashboard();
+  revalidateMatchroom();
 }
 
 /**
@@ -357,7 +367,7 @@ export async function assignCaptain(formData: FormData): Promise<void> {
     });
   });
   await claimHost(room.id, user);
-  revalidateDashboard();
+  revalidateMatchroom();
 }
 
 /**
@@ -373,17 +383,12 @@ export async function assignCoach(formData: FormData): Promise<void> {
   const team = String(formData.get("team")) as "A" | "B";
   const room = await getActiveRoom();
 
-  const currentCoaches = room.players.filter((p) => p.team === team && p.isCoach).length;
-  if (currentCoaches >= room.coachesPerTeam) {
-    throw new Error(`Team ${team} already has ${room.coachesPerTeam} coach(es)`);
-  }
-
   await db.roomPlayer.update({
     where: { id: targetRoomPlayerId },
     data: { team, isCoach: true, isCaptain: false },
   });
   await claimHost(room.id, user);
-  revalidateDashboard();
+  revalidateMatchroom();
 }
 
 /** Safety valve for host mistakes: sends a player back to the waiting pool. */
@@ -398,7 +403,29 @@ export async function unassignPlayer(formData: FormData): Promise<void> {
     data: { team: "UNASSIGNED", isCaptain: false, isCoach: false },
   });
   await claimHost(room.id, user);
-  revalidateDashboard();
+  revalidateMatchroom();
+}
+
+/**
+ * Bulk version of unassignPlayer — sends everyone back to the waiting pool
+ * in one go and clears any in-progress draft (its team-by-team picks would
+ * otherwise reference a team formation that no longer exists). A fresh
+ * start for team formation without unassigning one player at a time.
+ */
+export async function resetTeamsAction(): Promise<void> {
+  const user = await requireUser();
+  assertCanManage(user);
+  const room = await getActiveRoom();
+
+  await db.$transaction([
+    db.roomPlayer.updateMany({
+      where: { roomId: room.id },
+      data: { team: "UNASSIGNED", isCaptain: false, isCoach: false, isReady: false },
+    }),
+    db.draft.deleteMany({ where: { roomId: room.id } }),
+  ]);
+  await claimHost(room.id, user);
+  revalidateMatchroom();
 }
 
 export async function scrambleTeams(): Promise<void> {
@@ -420,7 +447,7 @@ export async function scrambleTeams(): Promise<void> {
     ...teamB.map((p) => db.roomPlayer.update({ where: { id: p.id }, data: { team: "B" } })),
   ]);
   await claimHost(room.id, user);
-  revalidateDashboard();
+  revalidateMatchroom();
 }
 
 export async function balanceTeamsAction(): Promise<void> {
@@ -455,16 +482,29 @@ export async function balanceTeamsAction(): Promise<void> {
     ),
   );
   await claimHost(room.id, user);
-  revalidateDashboard();
+  revalidateMatchroom();
 }
 
+/**
+ * The host's manual "go" — the actual trigger out of SETUP, now that
+ * there's no fixed team size to auto-detect against. Works with whatever
+ * split the teams have ended up with, even 1v1.
+ */
 export async function startVetoAction(): Promise<void> {
   const user = await requireUser();
   assertCanManage(user);
   const room = await getActiveRoom();
+  if (room.status !== "SETUP") {
+    throw new Error("This room has already moved past team setup");
+  }
+  const countA = room.players.filter((p) => p.team === "A" && !p.isCoach).length;
+  const countB = room.players.filter((p) => p.team === "B" && !p.isCoach).length;
+  if (countA === 0 || countB === 0) {
+    throw new Error("Both teams need at least one player before starting");
+  }
   await startVetoForRoom(room);
   await claimHost(room.id, user);
-  revalidateDashboard();
+  revalidateMatchroom();
 }
 
 export async function banMapAction(formData: FormData): Promise<void> {
@@ -506,38 +546,7 @@ export async function banMapAction(formData: FormData): Promise<void> {
   if (next.done) {
     await db.room.update({ where: { id: room.id }, data: { status: "READY" } });
   }
-  revalidateDashboard();
-}
-
-export async function overrideMapsAction(formData: FormData): Promise<void> {
-  const user = await requireUser();
-  assertCanManage(user);
-  const room = await getActiveRoom();
-
-  const required = mapsRequiredForFormat(room.format as Format);
-  const maps = Array.from({ length: required }, (_, i) => formData.get(`map_${i}`)).map(String);
-  if (maps.some((m) => !m)) throw new Error("Choose a map for every slot");
-
-  await db.veto.upsert({
-    where: { roomId: room.id },
-    update: { status: "DONE", finalMapList: JSON.stringify(maps), overriddenByHost: true },
-    create: {
-      roomId: room.id,
-      status: "DONE",
-      finalMapList: JSON.stringify(maps),
-      overriddenByHost: true,
-    },
-  });
-  // Deliberately doesn't touch room.status: if this happens during SETUP
-  // (before everyone's ready), settings should stay editable — setReady
-  // is what actually advances the phase once ready-up completes. If the
-  // room's already past SETUP (e.g. overriding mid-veto as an escape
-  // hatch), resolve straight to READY.
-  if (room.status !== "SETUP" && room.status !== "LIVE") {
-    await db.room.update({ where: { id: room.id }, data: { status: "READY" } });
-  }
-  await claimHost(room.id, user);
-  revalidateDashboard();
+  revalidateMatchroom();
 }
 
 export async function startDraftAction(): Promise<void> {
@@ -551,10 +560,7 @@ export async function startDraftAction(): Promise<void> {
   if (!captainA || !captainB) throw new Error("Assign a captain to each team before starting the draft");
 
   const pool = room.players.filter((p) => p.team === "UNASSIGNED").map((p) => p.id);
-  // Captains already fill one slot each, so the draft only needs to fill
-  // the rest.
-  const targetPicksPerTeam = room.playersPerTeam - 1;
-  const state = startDraft(pool, "A", targetPicksPerTeam);
+  const state = startDraft(pool, "A");
 
   await db.draft.upsert({
     where: { roomId: room.id },
@@ -566,7 +572,7 @@ export async function startDraftAction(): Promise<void> {
     },
   });
   await claimHost(room.id, user);
-  revalidateDashboard();
+  revalidateMatchroom();
 }
 
 export async function draftPickAction(formData: FormData): Promise<void> {
@@ -581,12 +587,8 @@ export async function draftPickAction(formData: FormData): Promise<void> {
   const captainB = room.players.find((p) => p.team === "B" && p.isCaptain);
   if (!captainA || !captainB) throw new Error("Both captains must be assigned");
 
-  const targetPicksPerTeam = room.playersPerTeam - 1;
-  const countA = stepsSoFar.filter((s) => s.team === "A").length;
-  const countB = stepsSoFar.filter((s) => s.team === "B").length;
   const lastPicker = stepsSoFar.length > 0 ? stepsSoFar[stepsSoFar.length - 1].team : null;
-  const nextTeam = computeNextTeam(countA, countB, targetPicksPerTeam, lastPicker);
-  if (!nextTeam) throw new Error("Draft is already complete");
+  const nextTeam = computeNextTeam(lastPicker, "A");
 
   const isHost = user.role === "HOST" || user.role === "ADMIN";
   const actingCaptain = nextTeam === "A" ? captainA : captainB;
@@ -599,7 +601,7 @@ export async function draftPickAction(formData: FormData): Promise<void> {
     { pool, steps: stepsSoFar, nextTeam, done: false },
     nextTeam,
     targetRoomPlayerId,
-    targetPicksPerTeam,
+    "A",
   );
 
   await db.$transaction([
@@ -609,7 +611,7 @@ export async function draftPickAction(formData: FormData): Promise<void> {
       data: { status: next.done ? "DONE" : "IN_PROGRESS", steps: JSON.stringify(next.steps) },
     }),
   ]);
-  revalidateDashboard();
+  revalidateMatchroom();
 }
 
 export async function startMatchAction(): Promise<void> {
@@ -626,12 +628,13 @@ export async function startMatchAction(): Promise<void> {
     throw new Error("This room isn't in a startable state");
   }
 
-  const teamACount = room.players.filter((p) => p.team === "A" && p.isReady && !p.isCoach).length;
-  const teamBCount = room.players.filter((p) => p.team === "B" && p.isReady && !p.isCoach).length;
-  if (teamACount < room.playersPerTeam || teamBCount < room.playersPerTeam) {
-    throw new Error(
-      `Need ${room.playersPerTeam} ready players on each team (have ${teamACount} vs ${teamBCount})`,
-    );
+  // No fixed team size to check against — just make sure nobody's about
+  // to start a 0-a-side match. The host pressing Start is the actual
+  // "we're ready" signal now, not a per-player ready checkbox tally.
+  const teamACount = room.players.filter((p) => p.team === "A" && !p.isCoach).length;
+  const teamBCount = room.players.filter((p) => p.team === "B" && !p.isCoach).length;
+  if (teamACount === 0 || teamBCount === 0) {
+    throw new Error(`Both teams need at least one player (have ${teamACount} vs ${teamBCount})`);
   }
 
   if (!room.veto?.finalMapList) {
@@ -663,7 +666,7 @@ export async function startMatchAction(): Promise<void> {
   }
 
   await db.room.update({ where: { id: room.id }, data: { status: "LIVE", hostUserId: user.id } });
-  revalidateDashboard();
+  revalidateMatchroom();
 }
 
 export async function cancelMatchAction(): Promise<void> {
@@ -676,6 +679,8 @@ export async function cancelMatchAction(): Promise<void> {
   });
   if (!room) throw new Error("There's no active match to cancel");
 
+  const roundsPlayed = room.match ? room.match.team1Score + room.match.team2Score : 0;
+
   if (room.match && room.status === "LIVE") {
     const config = await getServerConfig();
     if (config) {
@@ -683,10 +688,46 @@ export async function cancelMatchAction(): Promise<void> {
         console.error("Failed to end match on the server via RCON:", error);
       });
     }
-    await db.match.update({ where: { id: room.match.id }, data: { status: "CANCELLED" } });
   }
 
-  await db.room.update({ where: { id: room.id }, data: { status: "CANCELLED" } });
-  revalidatePath("/admin/rooms");
-  revalidateDashboard();
+  if (roundsPlayed === 0) {
+    // Nothing was actually played (most cancels happen during SETUP/VETO,
+    // before a Match row even exists) — deleting the room outright instead
+    // of marking it CANCELLED keeps the Players Lounge's match history
+    // free of empty entries nobody actually played. Cascades to
+    // RoomPlayer/Veto/Draft/Match/MatchEvent via the schema's onDelete:
+    // Cascade, so nothing needs cleaning up separately.
+    await db.room.delete({ where: { id: room.id } });
+  } else {
+    if (room.match) {
+      await db.match.update({ where: { id: room.match.id }, data: { status: "CANCELLED" } });
+    }
+    await db.room.update({ where: { id: room.id }, data: { status: "CANCELLED" } });
+  }
+
+  revalidatePath("/lounge");
+  revalidateMatchroom();
+}
+
+/**
+ * A finished match no longer auto-recycles into a fresh lobby (see
+ * getOrCreateActiveRoom in page.tsx) — the host presses this once everyone
+ * has seen the result.
+ */
+export async function startNewLobbyAction(): Promise<void> {
+  const user = await requireUser();
+  assertCanManage(user);
+  const stillActive = await db.room.findFirst({
+    where: { status: { notIn: ["COMPLETED", "CANCELLED"] } },
+  });
+  if (stillActive) throw new Error("There's already an active lobby");
+
+  await db.room.create({
+    data: {
+      ...DEFAULT_ROOM_SETTINGS,
+      mapPool: JSON.stringify(DEFAULT_ROOM_SETTINGS.mapPool),
+      hostUserId: user.id,
+    },
+  });
+  revalidateMatchroom();
 }

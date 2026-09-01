@@ -32,7 +32,7 @@ export default async function AdminServerPage({
         <h2 className="text-sm font-medium text-neutral-300">Invite code</h2>
         <p className="text-xs text-neutral-500">
           Required to create a brand-new account — existing members log back in freely. Hosts can
-          see this on the dashboard; regenerating invalidates it for anyone who hasn&apos;t signed
+          see this on the matchroom page; regenerating invalidates it for anyone who hasn&apos;t signed
           up yet.
         </p>
         <div className="flex items-center gap-3">

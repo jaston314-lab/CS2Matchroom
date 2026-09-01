@@ -31,5 +31,5 @@ export async function submitInviteCode(formData: FormData): Promise<void> {
   session.steamId64 = steamId64;
   session.pendingSteamId64 = undefined;
   await session.save();
-  redirect("/dashboard");
+  redirect("/matchroom");
 }

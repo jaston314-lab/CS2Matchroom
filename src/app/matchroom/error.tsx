@@ -1,6 +1,6 @@
 "use client";
 
-export default function DashboardError({
+export default function MatchroomError({
   error,
   reset,
 }: {

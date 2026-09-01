@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
     session.steamId64 = steamId64;
     session.pendingSteamId64 = undefined;
     await session.save();
-    return redirectTo("/dashboard");
+    return redirectTo("/matchroom");
   }
 
   // Bootstrap: whoever logs in first becomes admin, so there's no manual
@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
     session.steamId64 = steamId64;
     session.pendingSteamId64 = undefined;
     await session.save();
-    return redirectTo("/dashboard");
+    return redirectTo("/matchroom");
   }
 
   // Unknown SteamID, not the bootstrap case — don't create an account yet,

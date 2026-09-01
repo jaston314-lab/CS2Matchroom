@@ -26,7 +26,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full flex flex-col">
         <Nav />
-        <main className="flex-1 w-full max-w-5xl mx-auto px-4 py-8">{children}</main>
+        <main className="flex-1 w-full max-w-[1600px] mx-auto px-4 py-8">{children}</main>
       </body>
     </html>
   );

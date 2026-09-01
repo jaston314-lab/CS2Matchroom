@@ -45,8 +45,6 @@ model Room {
   mapPool           String   // JSON array of map strings
   knifeRound        Boolean  @default(true)
   overtimeEnabled   Boolean  @default(true)
-  minPlayersToStart Int      @default(10)
-  playersPerTeam    Int      @default(5)
   mode              String   @default("SELF_SELECT") // SELF_SELECT | CAPTAIN_DRAFT
   teamAName         String   @default("Team A")
   teamBName         String   @default("Team B")
@@ -54,7 +52,6 @@ model Room {
   // configured SteamIDs and auto-plays the match, for testing the
   // RCON/webhook pipeline without needing real players connected.
   simulation        Boolean  @default(false)
-  coachesPerTeam    Int      @default(1)
   createdAt         DateTime @default(now())
 
   players RoomPlayer[]

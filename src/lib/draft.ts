@@ -7,33 +7,22 @@ export interface DraftState {
   done: boolean;
 }
 
-function countOn(steps: DraftStep[], team: "A" | "B"): number {
-  return steps.filter((s) => s.team === team).length;
-}
-
 /**
- * Unlike veto's plain alternation, a team that's already hit
- * targetPerTeam stops getting turns even if the pool isn't empty yet
- * (e.g. more than 10 people signed up) — the other captain just keeps
- * picking until their side is full too.
+ * No fixed per-team target — captains just alternate picks until the pool
+ * empties, however many people showed up. That naturally produces uneven
+ * teams when the pool doesn't split evenly (e.g. 7 players in the pool
+ * ends up 4/3), which is intentional: team size isn't a configured
+ * setting, it's just whatever the room actually has.
  */
-export function computeNextTeam(
-  countA: number,
-  countB: number,
-  targetPerTeam: number,
-  lastPicker: "A" | "B" | null,
-): "A" | "B" | null {
-  const aOpen = countA < targetPerTeam;
-  const bOpen = countB < targetPerTeam;
-  if (!aOpen && !bOpen) return null;
-  if (aOpen && bOpen) return lastPicker === "A" ? "B" : "A";
-  return aOpen ? "A" : "B";
+export function computeNextTeam(lastPicker: "A" | "B" | null, firstTeam: "A" | "B"): "A" | "B" {
+  if (lastPicker === null) return firstTeam;
+  return lastPicker === "A" ? "B" : "A";
 }
 
 /** Sets up a fresh draft: captains alternately pick from the waiting pool. */
-export function startDraft(poolIds: string[], firstTeam: "A" | "B", targetPerTeam: number): DraftState {
+export function startDraft(poolIds: string[], firstTeam: "A" | "B"): DraftState {
   const pool = [...poolIds];
-  const done = pool.length === 0 || targetPerTeam === 0;
+  const done = pool.length === 0;
   return {
     pool,
     steps: [],
@@ -51,7 +40,7 @@ export function applyPick(
   state: DraftState,
   team: "A" | "B",
   roomPlayerId: string,
-  targetPerTeam: number,
+  firstTeam: "A" | "B",
 ): DraftState {
   if (state.done) throw new Error("Draft is already complete");
   if (state.nextTeam !== team) throw new Error(`It's Team ${state.nextTeam}'s turn to pick`);
@@ -59,10 +48,8 @@ export function applyPick(
 
   const pool = state.pool.filter((id) => id !== roomPlayerId);
   const steps: DraftStep[] = [...state.steps, { team, roomPlayerId }];
-  const countA = countOn(steps, "A");
-  const countB = countOn(steps, "B");
-  const nextTeam = computeNextTeam(countA, countB, targetPerTeam, team);
-  const done = nextTeam === null || pool.length === 0;
+  const done = pool.length === 0;
+  const nextTeam = done ? null : computeNextTeam(team, firstTeam);
 
-  return { pool, steps, nextTeam: done ? null : nextTeam, done };
+  return { pool, steps, nextTeam, done };
 }

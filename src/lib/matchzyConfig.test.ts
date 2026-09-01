@@ -26,8 +26,6 @@ const baseInput: BuildMatchConfigInput = {
     format: "BO1",
     knifeRound: true,
     overtimeEnabled: true,
-    playersPerTeam: 2,
-    coachesPerTeam: 1,
     teamAName: "Team A",
     teamBName: "Team B",
     simulation: false,
@@ -57,7 +55,21 @@ describe("buildMatchConfig", () => {
     });
     expect(config.maplist).toEqual(["de_mirage"]);
     expect(config.matchid).toBe("test-match-1");
-    expect(config.coaches_per_team).toBe(1);
+    expect(config.players_per_team).toBe(2);
+    expect(config.min_players_to_ready).toBe(2);
+    expect(config.coaches_per_team).toBe(0);
+  });
+
+  it("derives players_per_team from the larger real roster — teams aren't a configured setting", () => {
+    const config = buildMatchConfig({
+      ...baseInput,
+      roomPlayers: [
+        ...baseInput.roomPlayers,
+        roomPlayer("5", "A") as never, // Team A now has 3, Team B still has 2
+      ],
+    });
+    expect(config.players_per_team).toBe(3);
+    expect(config.min_players_to_ready).toBe(3);
   });
 
   it("puts a coach in the coaches map, excluded from the players map", () => {
