@@ -1,5 +1,6 @@
 import { requireRole } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { CopyButton } from "@/components/CopyButton";
 import { saveServerConfigAction, testRconConnectionAction, regenerateInviteCodeAction } from "./actions";
 
 export default async function AdminServerPage({
@@ -16,12 +17,15 @@ export default async function AdminServerPage({
     <div className="max-w-lg space-y-6">
       <h1 className="text-2xl font-semibold">Server config</h1>
 
+      <SetupGuide />
+
       {params.saved && !params.applyError && (
         <Banner tone="ok">Saved and applied to the server.</Banner>
       )}
       {params.saved && params.applyError && (
         <Banner tone="warn">
-          Saved, but couldn&apos;t apply the webhook/server-id convars over RCON: {params.applyError}
+          Saved, but couldn&apos;t apply the webhook/server-id convars over RCON: {params.applyError}.
+          Use the console commands below instead — same effect.
         </Banner>
       )}
       {params.testOk === "1" && <Banner tone="ok">Connected — server hostname: {params.testHostname}</Banner>}
@@ -47,9 +51,21 @@ export default async function AdminServerPage({
         </div>
       </section>
 
-      <form action={saveServerConfigAction} className="space-y-4">
-        <Field label="RCON host" name="rconHost" defaultValue={config?.rconHost ?? "192.168.100.80"} />
-        <Field label="RCON port" name="rconPort" type="number" defaultValue={String(config?.rconPort ?? 25568)} />
+      {/* autoComplete="off" on the form is mostly ignored by password
+          managers once they spot a type="password" field anywhere inside
+          — that's what actually triggers Bitwarden to treat the whole
+          thing as a login form and offer to fill the nearest text field
+          as a "username". autoComplete="new-password" (below) is the hint
+          password managers are most likely to actually respect for
+          suppressing that. */}
+      <form action={saveServerConfigAction} className="space-y-4" autoComplete="off">
+        <Field
+          label="RCON host"
+          name="rconHost"
+          defaultValue={config?.rconHost ?? ""}
+          hint="Needed for live matches (loading/ending a match automatically when a host presses Start) — not for the one-time setup below, that can be done entirely by pasting commands into Pelican."
+        />
+        <Field label="RCON port" name="rconPort" type="number" defaultValue={String(config?.rconPort ?? 27015)} />
         <div>
           <label className="block text-sm text-neutral-300 mb-1" htmlFor="rconPassword">
             RCON password {hasPassword && <span className="text-neutral-500">(currently set — leave blank to keep it)</span>}
@@ -58,7 +74,9 @@ export default async function AdminServerPage({
             id="rconPassword"
             name="rconPassword"
             type="password"
-            autoComplete="off"
+            autoComplete="new-password"
+            data-lpignore="true"
+            data-1p-ignore="true"
             className="w-full rounded-lg bg-neutral-900 border border-neutral-700 px-3 py-2 focus:border-blue-500 focus:outline-none"
           />
         </div>
@@ -66,13 +84,25 @@ export default async function AdminServerPage({
           label="Webhook shared secret"
           name="webhookSharedSecret"
           defaultValue={config?.webhookSharedSecret ?? ""}
-          hint="Sent as X-MatchZy-Secret on both the config-load RCON call and expected on incoming webhook posts."
+          hint="Any random string. The server includes it on every match event it sends back, so this app can tell it's really your server."
         />
         <Field
           label="App public URL"
           name="appPublicUrl"
-          defaultValue={config?.appPublicUrl ?? process.env.APP_PUBLIC_URL ?? ""}
-          hint="Must be reachable from the CS2 server's network — used to build the match config URL and webhook URL."
+          defaultValue={config?.appPublicUrl ?? ""}
+          hint="The one place this ever needs to be set — used for Steam sign-in and the CS2 server's match config, webhook, and demo upload. Must be reachable by players' browsers and by the CS2 server."
+        />
+        <Field
+          label="Game connect address"
+          name="gameConnectAddress"
+          defaultValue={config?.gameConnectAddress ?? ""}
+          hint={`What players type as "connect <this>" in the CS2 console to join a live match — shown on the matchroom page once a match starts. Not necessarily the same as the RCON host above: this needs to be reachable by players' game clients (their public IP/domain if they're off your LAN), while RCON only needs to be reachable by this app. Usually host:port, e.g. 192.168.100.80:25568.`}
+        />
+        <Field
+          label="Local app URL (optional)"
+          name="localAppUrl"
+          defaultValue={config?.localAppUrl ?? ""}
+          hint="Only matters if the CS2 server and this app are on the same network (RCON already reaching a LAN IP is a good sign they are). Demo files are large — if this is set, they're uploaded straight over the LAN instead of round-tripping through the public URL, which can otherwise exceed MatchZy's 60s upload timeout on a slower home connection. e.g. http://192.168.1.185:3000. Leave blank to just use the public URL for everything."
         />
 
         <div className="flex gap-3 pt-2">
@@ -91,6 +121,12 @@ export default async function AdminServerPage({
           </button>
         </div>
       </form>
+
+      <ConsoleCommands
+        appPublicUrl={config?.appPublicUrl ?? ""}
+        webhookSharedSecret={config?.webhookSharedSecret ?? ""}
+        localAppUrl={config?.localAppUrl ?? ""}
+      />
     </div>
   );
 }
@@ -118,10 +154,138 @@ function Field({
         name={name}
         type={type}
         defaultValue={defaultValue}
+        autoComplete="off"
+        data-lpignore="true"
+        data-1p-ignore="true"
         className="w-full rounded-lg bg-neutral-900 border border-neutral-700 px-3 py-2 focus:border-blue-500 focus:outline-none"
       />
       {hint && <p className="text-xs text-neutral-500 mt-1">{hint}</p>}
     </div>
+  );
+}
+
+/**
+ * The exact commands src/lib/rcon.ts's applyServerConfig() sends over RCON
+ * on save — offered here as copy-paste text too, since "Save & apply"
+ * relying on this app reaching the server's RCON port isn't always
+ * something you want to depend on. Pasting these into Pelican's own
+ * console (which always works — it's not going over the network the way
+ * this app's outbound RCON call does) has the exact same effect.
+ */
+function ConsoleCommands({
+  appPublicUrl,
+  webhookSharedSecret,
+  localAppUrl,
+}: {
+  appPublicUrl: string;
+  webhookSharedSecret: string;
+  localAppUrl: string;
+}) {
+  if (!appPublicUrl || !webhookSharedSecret) {
+    return (
+      <section className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-4 space-y-1.5 text-sm">
+        <h2 className="font-medium text-neutral-300">Pelican console commands</h2>
+        <p className="text-neutral-500 text-xs">
+          Fill in and save &quot;Webhook shared secret&quot; and &quot;App public URL&quot; above first — the exact
+          commands to paste into the server console will appear here once both are set.
+        </p>
+      </section>
+    );
+  }
+
+  const webhookUrl = `${appPublicUrl.replace(/\/$/, "")}/api/matchzy/webhook`;
+  // Demo uploads are large — route them over the LAN if we have an address
+  // for it, same reasoning as applyServerConfig in src/lib/rcon.ts.
+  const demoUploadBase = localAppUrl || appPublicUrl;
+  const demoUploadUrl = `${demoUploadBase.replace(/\/$/, "")}/api/matchzy/demo`;
+  const commands = [
+    `matchzy_server_id "cs2-matchroom"`,
+    `matchzy_remote_log_url "${webhookUrl}"`,
+    `matchzy_remote_log_header_key "X-MatchZy-Secret"`,
+    `matchzy_remote_log_header_value "${webhookSharedSecret}"`,
+    `matchzy_demo_upload_url "${demoUploadUrl}"`,
+    `matchzy_demo_upload_header_key "X-MatchZy-Secret"`,
+    `matchzy_demo_upload_header_value "${webhookSharedSecret}"`,
+    `matchzy_demo_recording_enabled "1"`,
+    `tv_enable "1"`,
+  ].join("\n");
+
+  return (
+    <section className="rounded-xl border border-blue-800/60 bg-blue-950/10 p-4 space-y-2">
+      <h2 className="text-sm font-medium text-neutral-300">Pelican console commands</h2>
+      <p className="text-xs text-neutral-500">
+        One-time setup — paste these into the server&apos;s console in Pelican. Only needs re-running
+        if the webhook secret or public URL above change (e.g. moving to a new domain/server).{" "}
+        <span className="text-neutral-400">
+          &quot;Save &amp; apply&quot; above already tries to run these for you automatically over RCON — this
+          is only here for when you&apos;d rather do it yourself, or RCON isn&apos;t reachable from wherever
+          this app runs.
+        </span>
+      </p>
+      <div className="rounded-lg bg-neutral-950 border border-neutral-800 p-3 space-y-2">
+        <pre className="text-xs text-neutral-300 whitespace-pre-wrap break-all font-mono">{commands}</pre>
+        <CopyButton text={commands} label="Copy commands" />
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Reference doc for "how do I connect this app to a CS2 server" — written
+ * so future-you (or a fresh install pointed at a different server) has
+ * somewhere to look instead of re-deriving it from the code.
+ */
+function SetupGuide() {
+  return (
+    <details className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-4 text-sm">
+      <summary className="cursor-pointer font-medium text-neutral-200">
+        Connecting this app to a CS2 server — setup guide
+      </summary>
+      <ol className="mt-3 space-y-4 list-decimal list-inside text-neutral-300">
+        <li>
+          <span className="font-medium">On the CS2 server:</span>{" "}
+          <span className="text-neutral-400">
+            the MatchZy Enhanced plugin must be installed, and RCON enabled (an{" "}
+            <code className="text-neutral-300">rcon_password</code> set on the server). Note the RCON
+            host/port — usually the same host/port as the game server itself, but it can differ.
+          </span>
+        </li>
+        <li>
+          <span className="font-medium">Fill in everything below and save</span> —{" "}
+          <span className="text-neutral-400">
+            RCON host/port/password, a webhook shared secret (any random string), and the &quot;App
+            public URL&quot; this app is reachable at. That last one is the only address that matters
+            anywhere in this app — it&apos;s used for both Steam sign-in and the CS2 server&apos;s match
+            config/webhook, so there&apos;s nothing else to keep in sync.
+          </span>
+        </li>
+        <li>
+          <span className="font-medium">Use &quot;Test RCON connection&quot;</span>{" "}
+          <span className="text-neutral-400">to confirm the app can actually reach the server before relying on it.</span>
+        </li>
+        <li>
+          <span className="font-medium">Press &quot;Save &amp; apply&quot;.</span>{" "}
+          <span className="text-neutral-400">
+            This does two things: saves your settings, and tries to push the one-time MatchZy setup
+            convars to the server over RCON automatically. If that works, you&apos;re done. If RCON isn&apos;t
+            reachable from wherever this app runs (common with some game-host setups), you&apos;ll see a
+            warning — in that case, copy the commands from the &quot;Pelican console commands&quot; box
+            further down and paste them into the server&apos;s console in Pelican yourself. Same result
+            either way.
+          </span>
+        </li>
+        <li>
+          <span className="font-medium">That&apos;s the entire one-time setup.</span>{" "}
+          <span className="text-neutral-400">
+            RCON still needs to work for actual live matches (loading/ending a match when a host
+            presses Start) — that happens automatically from this app each time, there&apos;s nothing to
+            paste for that part. If you ever switch to a different server or domain, come back to
+            this page, update the fields, and re-run (or re-paste) the console commands — nothing
+            outside this page ever needs editing.
+          </span>
+        </li>
+      </ol>
+    </details>
   );
 }
 

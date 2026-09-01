@@ -18,6 +18,8 @@ async function readFormConfig(formData: FormData) {
   const rconPasswordInput = String(formData.get("rconPassword") ?? "");
   const webhookSharedSecret = String(formData.get("webhookSharedSecret") ?? "").trim();
   const appPublicUrl = String(formData.get("appPublicUrl") ?? "").trim();
+  const gameConnectAddress = String(formData.get("gameConnectAddress") ?? "").trim();
+  const localAppUrl = String(formData.get("localAppUrl") ?? "").trim();
 
   if (!rconHost) throw new Error("RCON host is required");
   if (!Number.isInteger(rconPort) || rconPort < 1 || rconPort > 65535) {
@@ -32,7 +34,7 @@ async function readFormConfig(formData: FormData) {
     rconPassword = existing ? decrypt(existing.rconPasswordEncrypted) : "";
   }
 
-  return { rconHost, rconPort, rconPassword, webhookSharedSecret, appPublicUrl };
+  return { rconHost, rconPort, rconPassword, webhookSharedSecret, appPublicUrl, gameConnectAddress, localAppUrl };
 }
 
 export async function saveServerConfigAction(formData: FormData): Promise<void> {
@@ -47,6 +49,8 @@ export async function saveServerConfigAction(formData: FormData): Promise<void> 
       rconPasswordEncrypted: encrypt(config.rconPassword),
       webhookSharedSecret: config.webhookSharedSecret,
       appPublicUrl: config.appPublicUrl,
+      gameConnectAddress: config.gameConnectAddress,
+      localAppUrl: config.localAppUrl,
     },
     create: {
       id: "singleton",
@@ -55,6 +59,8 @@ export async function saveServerConfigAction(formData: FormData): Promise<void> 
       rconPasswordEncrypted: encrypt(config.rconPassword),
       webhookSharedSecret: config.webhookSharedSecret,
       appPublicUrl: config.appPublicUrl,
+      gameConnectAddress: config.gameConnectAddress,
+      localAppUrl: config.localAppUrl,
     },
   });
 
@@ -81,10 +87,16 @@ export async function testRconConnectionAction(formData: FormData): Promise<void
   await requireRole(["ADMIN"]);
   const config = await readFormConfig(formData);
 
+  // redirect() works by throwing — it must never be called inside a try
+  // block that has a catch below it, or Next.js's own redirect throw gets
+  // swallowed as if it were a real error from testConnection() (this is
+  // exactly what produced "Connection failed: NEXT_REDIRECT" on a
+  // successful test).
+  let hostname: string;
   try {
-    const hostname = await testConnection(config);
-    redirectWithParams({ testOk: "1", testHostname: hostname });
+    hostname = await testConnection(config);
   } catch (error) {
     redirectWithParams({ testOk: "0", testError: (error as Error).message });
   }
+  redirectWithParams({ testOk: "1", testHostname: hostname });
 }

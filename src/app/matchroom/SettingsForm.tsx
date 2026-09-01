@@ -1,9 +1,11 @@
 "use client";
 
-import { useState, type ChangeEvent, type FocusEvent, type MouseEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AVAILABLE_MAPS } from "@/lib/maps";
 import { DEFAULT_ROOM_SETTINGS } from "@/lib/roomDefaults";
-import { updateSettingsAction, resetSettingsAction } from "./actions";
+import { updateSettingsAction, resetSettingsAction, type UpdateSettingsInput } from "./actions";
+
+const SAVE_DEBOUNCE_MS = 400;
 
 /**
  * Every field here is controlled by local state seeded once from the
@@ -14,6 +16,18 @@ import { updateSettingsAction, resetSettingsAction } from "./actions";
  * The trade-off is this form won't live-reflect another host's
  * concurrent edits — acceptable for a small crew, and far better than
  * your own picks silently reverting.
+ *
+ * Saving itself used to fire a native form submission on every single
+ * change (a dropdown pick, each checkbox click). That's what caused the
+ * "flickers a few times then settles" / "needs a couple of clicks" bug:
+ * rapid edits fired multiple overlapping requests to updateSettingsAction
+ * with no guarantee they'd land at the DB in the order they were sent —
+ * an earlier click's slightly-slower request completing *after* a later
+ * one would silently overwrite it, undoing the later edit until you
+ * clicked again. The fix is the save queue below: debounce rapid edits
+ * into one save, and never let two saves be in flight at once — if a
+ * change comes in while a save is running, it's queued to run right
+ * after, using whatever the state is *then*, not two racing requests.
  */
 export function SettingsForm({
   room,
@@ -39,17 +53,56 @@ export function SettingsForm({
   const [overtimeEnabled, setOvertimeEnabled] = useState(room.overtimeEnabled);
   const [simulation, setSimulation] = useState(room.simulation);
 
-  function submitSoon(e: ChangeEvent<HTMLElement> | FocusEvent<HTMLElement>) {
-    // Fires after the state update above has been applied to the DOM
-    // control, so the form reads the value that was just picked.
-    (e.currentTarget as HTMLInputElement).form?.requestSubmit();
-  }
+  // Always holds the latest values, updated in an effect after every
+  // render — so the save queue below never reads a stale closure, however
+  // it's triggered. (Not written during render itself: refs are for
+  // event handlers/effects, not render — see the React docs on useRef.)
+  const latestRef = useRef<UpdateSettingsInput>(null!);
+  useEffect(() => {
+    latestRef.current = {
+      label,
+      format,
+      mode,
+      mapPool: pool,
+      knifeRound,
+      overtimeEnabled,
+      simulation: isAdmin ? simulation : undefined,
+    };
+  });
 
-  function handleResetClick(e: MouseEvent<HTMLButtonElement>) {
-    if (!window.confirm("Reset match settings back to the defaults?")) {
-      e.preventDefault();
+  const savingRef = useRef(false);
+  const pendingRef = useRef(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  async function flush() {
+    if (savingRef.current) {
+      // A save is already in flight — don't start a second, overlapping
+      // one. Just remember to run again (with whatever's latest by then)
+      // once this one finishes.
+      pendingRef.current = true;
       return;
     }
+    savingRef.current = true;
+    try {
+      await updateSettingsAction(latestRef.current);
+    } catch (err) {
+      console.error("Failed to save match settings:", err);
+    } finally {
+      savingRef.current = false;
+      if (pendingRef.current) {
+        pendingRef.current = false;
+        void flush();
+      }
+    }
+  }
+
+  function scheduleSave() {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => void flush(), SAVE_DEBOUNCE_MS);
+  }
+
+  async function handleReset() {
+    if (!window.confirm("Reset match settings back to the defaults?")) return;
     setLabel(DEFAULT_ROOM_SETTINGS.label);
     setFormat(DEFAULT_ROOM_SETTINGS.format);
     setMode(DEFAULT_ROOM_SETTINGS.mode);
@@ -57,30 +110,32 @@ export function SettingsForm({
     setKnifeRound(DEFAULT_ROOM_SETTINGS.knifeRound);
     setOvertimeEnabled(DEFAULT_ROOM_SETTINGS.overtimeEnabled);
     setSimulation(DEFAULT_ROOM_SETTINGS.simulation);
-    // The button's own formAction={resetSettingsAction} still submits
-    // normally after this — this just makes the UI update optimistically
-    // instead of waiting on the round trip.
+    // Cancel any pending debounced save of the old values — the reset
+    // action below is the actual write, and it's already the *only*
+    // request in flight since resetSettingsAction goes straight through,
+    // not via the queue.
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    try {
+      await resetSettingsAction();
+    } catch (err) {
+      console.error("Failed to reset match settings:", err);
+    }
   }
 
   return (
     <section className="rounded-xl border border-blue-800/60 bg-blue-950/10 p-3 space-y-3 text-xs text-center">
       <h2 className="text-xs font-semibold text-neutral-200">Match settings</h2>
-      <form action={updateSettingsAction} className="space-y-3">
-        {/* Lets the action tell "admin unchecked test mode" apart from
-            "a host saved some other field and can't even see this one" —
-            HTML omits unchecked checkboxes from the submission either way. */}
-        <input type="hidden" name="canSetSimulation" value={isAdmin ? "1" : "0"} />
+      <form onSubmit={(e) => e.preventDefault()} className="space-y-3">
         <div>
           <label className="block text-neutral-400 mb-0.5" htmlFor="label">
             Match name
           </label>
           <input
             id="label"
-            name="label"
             required
             value={label}
             onChange={(e) => setLabel(e.target.value)}
-            onBlur={submitSoon}
+            onBlur={scheduleSave}
             className="w-full rounded-md bg-neutral-900 border border-neutral-700 px-2 py-1 text-center focus:border-blue-500 focus:outline-none"
           />
         </div>
@@ -92,11 +147,10 @@ export function SettingsForm({
             </label>
             <select
               id="format"
-              name="format"
               value={format}
               onChange={(e) => {
                 setFormat(e.target.value);
-                submitSoon(e);
+                scheduleSave();
               }}
               className="w-full rounded-md bg-neutral-900 border border-neutral-700 px-1.5 py-1 text-center focus:border-blue-500 focus:outline-none"
             >
@@ -111,11 +165,10 @@ export function SettingsForm({
             </label>
             <select
               id="mode"
-              name="mode"
               value={mode}
               onChange={(e) => {
                 setMode(e.target.value);
-                submitSoon(e);
+                scheduleSave();
               }}
               className="w-full rounded-md bg-neutral-900 border border-neutral-700 px-1.5 py-1 text-center focus:border-blue-500 focus:outline-none"
             >
@@ -138,14 +191,12 @@ export function SettingsForm({
                 <span className="text-right">{map.label}</span>
                 <input
                   type="checkbox"
-                  name="mapPool"
-                  value={map.id}
                   checked={pool.includes(map.id)}
                   onChange={(e) => {
                     setPool((prev) =>
                       e.target.checked ? [...prev, map.id] : prev.filter((id) => id !== map.id),
                     );
-                    submitSoon(e);
+                    scheduleSave();
                   }}
                   className="accent-blue-500 justify-self-start"
                 />
@@ -158,11 +209,10 @@ export function SettingsForm({
           <label className="flex items-center gap-1.5">
             <input
               type="checkbox"
-              name="knifeRound"
               checked={knifeRound}
               onChange={(e) => {
                 setKnifeRound(e.target.checked);
-                submitSoon(e);
+                scheduleSave();
               }}
               className="accent-blue-500"
             />
@@ -171,11 +221,10 @@ export function SettingsForm({
           <label className="flex items-center gap-1.5">
             <input
               type="checkbox"
-              name="overtimeEnabled"
               checked={overtimeEnabled}
               onChange={(e) => {
                 setOvertimeEnabled(e.target.checked);
-                submitSoon(e);
+                scheduleSave();
               }}
               className="accent-blue-500"
             />
@@ -190,11 +239,10 @@ export function SettingsForm({
           >
             <input
               type="checkbox"
-              name="simulation"
               checked={simulation}
               onChange={(e) => {
                 setSimulation(e.target.checked);
-                submitSoon(e);
+                scheduleSave();
               }}
               className="accent-blue-500 mt-0.5"
             />
@@ -205,9 +253,8 @@ export function SettingsForm({
         )}
 
         <button
-          type="submit"
-          formAction={resetSettingsAction}
-          onClick={handleResetClick}
+          type="button"
+          onClick={handleReset}
           className="w-full rounded-md border border-neutral-700 px-3 py-1.5 text-neutral-300 font-medium hover:border-red-700 hover:text-red-300 transition-colors"
         >
           Reset settings

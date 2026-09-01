@@ -5,13 +5,14 @@ import { resolveRatingsForRoom } from "@/lib/rating";
 import { fetchLeetifyMatchStatsForRoom } from "@/lib/leetifyStats";
 import { PremierRatingBadge } from "@/components/PremierRatingBadge";
 import { LeetifyStatsStrip } from "@/components/LeetifyStatsStrip";
+import { DeleteGameButton } from "./DeleteGameButton";
 
 export default async function PlayersLoungePage({
   searchParams,
 }: {
   searchParams: Promise<{ tab?: string }>;
 }) {
-  await requireUser();
+  const user = await requireUser();
   const { tab } = await searchParams;
   const activeTab = tab === "games" ? "games" : "players";
 
@@ -47,7 +48,7 @@ export default async function PlayersLoungePage({
           </p>
         </div>
       ) : (
-        <PreviousGamesTable />
+        <PreviousGamesTable isAdmin={user.role === "ADMIN"} />
       )}
     </div>
   );
@@ -140,7 +141,7 @@ async function PlayersTable() {
   );
 }
 
-async function PreviousGamesTable() {
+async function PreviousGamesTable({ isAdmin }: { isAdmin: boolean }) {
   const previousGames = await db.room.findMany({
     where: { status: { in: ["COMPLETED", "CANCELLED"] } },
     include: { host: true, match: true, _count: { select: { players: true } } },
@@ -158,12 +159,24 @@ async function PreviousGamesTable() {
             <th className="text-left px-4 py-2.5">Result</th>
             <th className="text-left px-4 py-2.5">Players</th>
             <th className="text-left px-4 py-2.5">Date</th>
+            {isAdmin && <th className="px-4 py-2.5" />}
           </tr>
         </thead>
         <tbody className="divide-y divide-neutral-800/80">
           {previousGames.map((room) => (
             <tr key={room.id} className="hover:bg-neutral-900/40 transition-colors">
-              <td className="px-4 py-2.5">{room.label}</td>
+              <td className="px-4 py-2.5">
+                {room.status === "COMPLETED" && room.match ? (
+                  <Link
+                    href={`/lounge/games/${room.id}`}
+                    className="text-blue-400 hover:text-blue-300 underline underline-offset-2"
+                  >
+                    {room.label}
+                  </Link>
+                ) : (
+                  room.label
+                )}
+              </td>
               <td className="px-4 py-2.5">{room.host.name}</td>
               <td className="px-4 py-2.5 text-neutral-400">
                 {room.status === "CANCELLED" && "Cancelled"}
@@ -178,11 +191,16 @@ async function PreviousGamesTable() {
               </td>
               <td className="px-4 py-2.5">{room._count.players}</td>
               <td className="px-4 py-2.5 text-neutral-400">{room.createdAt.toLocaleDateString()}</td>
+              {isAdmin && (
+                <td className="px-4 py-2.5 text-right">
+                  <DeleteGameButton roomId={room.id} />
+                </td>
+              )}
             </tr>
           ))}
           {previousGames.length === 0 && (
             <tr>
-              <td colSpan={5} className="px-4 py-6 text-center text-neutral-500">
+              <td colSpan={isAdmin ? 6 : 5} className="px-4 py-6 text-center text-neutral-500">
                 No games played yet
               </td>
             </tr>

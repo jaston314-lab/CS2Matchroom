@@ -2,17 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifySteamCallback, fetchSteamProfile } from "@/lib/steam";
 import { getSession } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { getAppPublicUrl } from "@/lib/appUrl";
 
-function redirectTo(path: string) {
-  const base = (process.env.APP_PUBLIC_URL ?? "http://localhost:3000").replace(/\/$/, "");
+async function redirectTo(path: string) {
+  const base = await getAppPublicUrl();
   return NextResponse.redirect(`${base}${path}`);
 }
 
 export async function GET(request: NextRequest) {
-  // Rebuild the callback URL from APP_PUBLIC_URL (not request.url) so it
-  // exactly matches the returnUrl used to start the login, even behind a
-  // reverse proxy that might otherwise change host/scheme.
-  const base = (process.env.APP_PUBLIC_URL ?? "http://localhost:3000").replace(/\/$/, "");
+  // Rebuild the callback URL from the configured public URL (not
+  // request.url) so it exactly matches the returnUrl used to start the
+  // login, even behind a reverse proxy that might otherwise change
+  // host/scheme.
+  const base = await getAppPublicUrl();
   const incoming = new URL(request.url);
   const callbackUrl = `${base}/api/auth/steam/callback${incoming.search}`;
 

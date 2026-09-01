@@ -1,18 +1,14 @@
 import "server-only";
 import { RelyingParty } from "openid";
+import { getAppPublicUrl } from "@/lib/appUrl";
 
 const STEAM_OPENID_IDENTIFIER = "https://steamcommunity.com/openid";
 const CALLBACK_PATH = "/api/auth/steam/callback";
 
-function appUrl(): string {
-  const url = process.env.APP_PUBLIC_URL;
-  if (!url) throw new Error("APP_PUBLIC_URL is not set (see .env.example)");
-  return url.replace(/\/$/, "");
-}
-
-function createRelyingParty(): RelyingParty {
-  const returnUrl = `${appUrl()}${CALLBACK_PATH}`;
-  const realm = appUrl();
+async function createRelyingParty(): Promise<RelyingParty> {
+  const base = await getAppPublicUrl();
+  const returnUrl = `${base}${CALLBACK_PATH}`;
+  const realm = base;
   // stateless: true — no server-side association store needed, at the cost
   // of one extra verification round-trip to Steam per login. Fine for a
   // small self-hosted app's login volume.
@@ -20,8 +16,8 @@ function createRelyingParty(): RelyingParty {
 }
 
 /** Returns the Steam URL to redirect the browser to for login. */
-export function getSteamLoginUrl(): Promise<string> {
-  const relyingParty = createRelyingParty();
+export async function getSteamLoginUrl(): Promise<string> {
+  const relyingParty = await createRelyingParty();
   return new Promise((resolve, reject) => {
     relyingParty.authenticate(STEAM_OPENID_IDENTIFIER, false, (error, authUrl) => {
       if (error || !authUrl) {
@@ -39,8 +35,8 @@ export function getSteamLoginUrl(): Promise<string> {
  * `callbackUrl` should be the full URL (matching the returnUrl passed to
  * getSteamLoginUrl) including the query string Steam appended.
  */
-export function verifySteamCallback(callbackUrl: string): Promise<string | null> {
-  const relyingParty = createRelyingParty();
+export async function verifySteamCallback(callbackUrl: string): Promise<string | null> {
+  const relyingParty = await createRelyingParty();
   return new Promise((resolve, reject) => {
     relyingParty.verifyAssertion(callbackUrl, (error, result) => {
       if (error) {

@@ -50,6 +50,21 @@ export async function POST(request: NextRequest) {
   if (update.connectAdd) connectedPlayers.add(update.connectAdd);
   if (update.connectRemove) connectedPlayers.delete(update.connectRemove);
 
+  // MatchZy's events don't actually carry a map-name field (only
+  // map_number) despite the event schema seeming like they might — resolve
+  // it from the map list we ourselves generated and stored on the match,
+  // instead of a field that's never populated.
+  const finalMapIndex = update.currentMapIndex ?? match.currentMapIndex;
+  let resolvedMap = update.currentMap ?? match.currentMap;
+  if (!resolvedMap) {
+    try {
+      const maplist = (JSON.parse(match.configJson) as { maplist?: string[] }).maplist;
+      resolvedMap = maplist?.[finalMapIndex] ?? resolvedMap;
+    } catch {
+      // configJson should always be valid JSON we wrote ourselves — ignore if not.
+    }
+  }
+
   const finalTeam1Score = update.team1Score ?? match.team1Score;
   const finalTeam2Score = update.team2Score ?? match.team2Score;
   // Only credit wins/losses on the transition *into* COMPLETED — guards
@@ -69,8 +84,8 @@ export async function POST(request: NextRequest) {
       status: update.status ?? match.status,
       team1Score: finalTeam1Score,
       team2Score: finalTeam2Score,
-      currentMap: update.currentMap ?? match.currentMap,
-      currentMapIndex: update.currentMapIndex ?? match.currentMapIndex,
+      currentMap: resolvedMap,
+      currentMapIndex: finalMapIndex,
       connectedPlayers: JSON.stringify([...connectedPlayers]),
       winnerTeam: winnerTeam ?? undefined,
     },

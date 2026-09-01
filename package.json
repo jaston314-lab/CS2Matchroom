@@ -12,8 +12,10 @@
     "db:generate": "prisma generate"
   },
   "dependencies": {
+    "@laihoe/demoparser2": "^0.42.0",
     "@prisma/adapter-better-sqlite3": "^7.10.0",
     "@prisma/client": "^7.10.0",
+    "adm-zip": "^0.6.0",
     "iron-session": "^8.0.4",
     "nanoid": "^6.0.1",
     "next": "16.3.3",
@@ -26,6 +28,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/adm-zip": "^0.5.8",
     "@types/node": "^20",
     "@types/openid": "^2.0.5",
     "@types/react": "^19",

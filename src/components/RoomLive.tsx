@@ -1,4 +1,5 @@
 import { mapLabel } from "@/lib/maps";
+import { CopyButton } from "@/components/CopyButton";
 
 interface MatchSnapshot {
   status: string;
@@ -26,11 +27,13 @@ export function RoomLive({
   teamAName,
   teamBName,
   players,
+  connectAddress,
 }: {
   match: MatchSnapshot;
   teamAName: string;
   teamBName: string;
   players: { steamId64: string; name: string }[];
+  connectAddress?: string | null;
 }) {
   const nameFor = (steamId64: string) =>
     players.find((p) => p.steamId64 === steamId64)?.name ?? steamId64;
@@ -47,6 +50,19 @@ export function RoomLive({
           </span>
         )}
       </div>
+
+      {connectAddress ? (
+        <div className="flex items-center justify-center gap-2">
+          <code className="rounded-md bg-neutral-950 border border-neutral-800 px-2.5 py-1 text-xs text-neutral-300">
+            connect {connectAddress}
+          </code>
+          <CopyButton text={`connect ${connectAddress}`} label="Copy" />
+        </div>
+      ) : (
+        <p className="text-xs text-neutral-600">
+          No connect address set — ask an admin to add one on the server config page.
+        </p>
+      )}
 
       <div className="flex items-center justify-center gap-4 sm:gap-6">
         <span className="text-sm font-medium text-neutral-300 w-20 sm:w-24 truncate text-right">

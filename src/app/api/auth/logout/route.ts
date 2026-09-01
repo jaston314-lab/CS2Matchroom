@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
+import { getAppPublicUrl } from "@/lib/appUrl";
 
 export async function POST() {
   const session = await getSession();
   session.destroy();
-  const base = (process.env.APP_PUBLIC_URL ?? "http://localhost:3000").replace(/\/$/, "");
+  const base = await getAppPublicUrl();
   return NextResponse.redirect(`${base}/`);
 }

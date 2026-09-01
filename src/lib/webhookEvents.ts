@@ -55,10 +55,12 @@ const STATUS_BY_EVENT: Record<string, MatchStatus> = {
   knife_start: "KNIFE",
   going_live: "LIVE",
   round_started: "LIVE",
+  round_end: "LIVE", // real event name (confirmed from a live payload) — round_ended below was a guess, kept in case older versions use it
   round_ended: "LIVE",
   halftime_started: "PAUSED",
   paused: "PAUSED",
   unpaused: "LIVE",
+  series_end: "COMPLETED", // real event name (confirmed from a live payload) — this was previously mismatched as "series_result" and never fired, leaving completed matches stuck at LIVE forever
   series_result: "COMPLETED",
   map_result: "LIVE", // series may continue to the next map
 };

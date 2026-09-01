@@ -77,7 +77,27 @@ async function startVetoForRoom(room: Pick<Room, "id" | "mapPool" | "format">) {
   });
 }
 
-export async function updateSettingsAction(formData: FormData): Promise<void> {
+export interface UpdateSettingsInput {
+  label: string;
+  format: string;
+  mode: string;
+  mapPool: string[];
+  knifeRound: boolean;
+  overtimeEnabled: boolean;
+  /** Only ever applied if the caller turns out to be an admin — see below. */
+  simulation?: boolean;
+}
+
+/**
+ * Called directly from SettingsForm (not wired to a <form action>) so the
+ * client can debounce and serialize saves itself — see the doc comment on
+ * SettingsForm's save queue for why that matters. Taking a plain object
+ * instead of FormData is also what lets "test mode" be admin-only cleanly:
+ * a host's client never includes `simulation` at all, so there's no
+ * FormData ambiguity between "not submitted" and "unchecked" to work
+ * around anymore.
+ */
+export async function updateSettingsAction(input: UpdateSettingsInput): Promise<void> {
   const user = await requireUser();
   assertCanManage(user);
   const room = await getActiveRoom();
@@ -85,30 +105,23 @@ export async function updateSettingsAction(formData: FormData): Promise<void> {
     throw new Error("Settings lock once teams start readying up");
   }
 
-  const label = String(formData.get("label") ?? "").trim();
-  const formatRaw = String(formData.get("format") ?? "BO1");
-  const modeRaw = String(formData.get("mode") ?? "SELF_SELECT");
-  const mapPool = formData.getAll("mapPool").map(String);
-  const knifeRound = formData.get("knifeRound") === "on";
-  const overtimeEnabled = formData.get("overtimeEnabled") === "on";
-  // Test mode is admin-only in the UI — a host's form submission omits the
-  // checkbox entirely (can't see it), which must NOT be read as "turn it
-  // off". Only touch this field when the submitter is actually an admin.
-  const canSetSimulation = user.role === "ADMIN" && formData.get("canSetSimulation") === "1";
-  const simulation = canSetSimulation ? formData.get("simulation") === "on" : undefined;
-
+  const label = input.label.trim();
   if (!label) throw new Error("Match name is required");
-  if (!(FORMATS as readonly string[]).includes(formatRaw)) throw new Error("Invalid format");
-  if (!(TEAM_FORMATION_MODES as readonly string[]).includes(modeRaw)) throw new Error("Invalid mode");
-  const format = formatRaw as Format;
-  const mode = modeRaw as TeamFormationMode;
+  if (!(FORMATS as readonly string[]).includes(input.format)) throw new Error("Invalid format");
+  if (!(TEAM_FORMATION_MODES as readonly string[]).includes(input.mode)) throw new Error("Invalid mode");
+  const format = input.format as Format;
+  const mode = input.mode as TeamFormationMode;
 
   const validMapIds = new Set<string>(AVAILABLE_MAPS.map((m) => m.id));
-  const cleanPool = mapPool.filter((m) => validMapIds.has(m));
+  const cleanPool = input.mapPool.filter((m) => validMapIds.has(m));
   const required = mapsRequiredForFormat(format);
   if (cleanPool.length < required) {
     throw new Error(`Pick at least ${required} map(s) for ${format}`);
   }
+
+  // Never trust the client on who's allowed to touch this, regardless of
+  // what it sent.
+  const simulation = user.role === "ADMIN" ? input.simulation : undefined;
 
   await db.room.update({
     where: { id: room.id },
@@ -117,8 +130,8 @@ export async function updateSettingsAction(formData: FormData): Promise<void> {
       format,
       mode,
       mapPool: JSON.stringify(cleanPool),
-      knifeRound,
-      overtimeEnabled,
+      knifeRound: input.knifeRound,
+      overtimeEnabled: input.overtimeEnabled,
       simulation,
       hostUserId: user.id,
     },
@@ -645,7 +658,12 @@ export async function startMatchAction(): Promise<void> {
   const config = await getServerConfig();
   if (!config) throw new Error("Server RCON isn't configured yet — ask an admin to set it up");
 
-  const matchzyMatchId = `match-${Date.now()}`;
+  // MatchZy requires `matchid` to be a genuine (small) JSON integer — a
+  // millisecond timestamp overflows a 32-bit int, and a "match-" prefix
+  // makes it a string, not a number. Seconds-since-epoch stays under the
+  // 32-bit signed ceiling (~2.147bn) until 2038, and is precise enough
+  // that two matches starting the same second is a non-issue in practice.
+  const matchzyMatchId = String(Math.floor(Date.now() / 1000));
   const configJson = buildMatchConfig({ room, roomPlayers: room.players, mapList, matchzyMatchId });
 
   const match = await db.match.create({

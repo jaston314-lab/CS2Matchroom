@@ -113,9 +113,8 @@ export default async function MatchroomPage() {
   const premierRatings = await resolveRatingsForRoom(
     room.players.map((p) => ({ steamId64: p.user.steamId64, manualRating: p.user.manualRating })),
   );
-  const inviteCode = canHost
-    ? (await db.serverConfig.findUnique({ where: { id: "singleton" } }))?.inviteCode || null
-    : null;
+  const serverConfig = await db.serverConfig.findUnique({ where: { id: "singleton" } });
+  const inviteCode = canHost ? serverConfig?.inviteCode || null : null;
 
   const isSetup = room.status === "SETUP";
   const isVeto = room.status === "VETO";
@@ -202,19 +201,27 @@ export default async function MatchroomPage() {
       )}
 
       {isLive && room.match && (
-        <RoomLive
-          match={{
-            status: room.match.status,
-            currentMap: room.match.currentMap,
-            currentMapIndex: room.match.currentMapIndex,
-            team1Score: room.match.team1Score,
-            team2Score: room.match.team2Score,
-            connectedPlayers: JSON.parse(room.match.connectedPlayers) as string[],
-          }}
-          teamAName={room.teamAName}
-          teamBName={room.teamBName}
-          players={room.players.map((p) => ({ steamId64: p.user.steamId64, name: p.user.name }))}
-        />
+        <div className="space-y-3">
+          <RoomLive
+            match={{
+              status: room.match.status,
+              currentMap: room.match.currentMap,
+              currentMapIndex: room.match.currentMapIndex,
+              team1Score: room.match.team1Score,
+              team2Score: room.match.team2Score,
+              connectedPlayers: JSON.parse(room.match.connectedPlayers) as string[],
+            }}
+            teamAName={room.teamAName}
+            teamBName={room.teamBName}
+            players={room.players.map((p) => ({ steamId64: p.user.steamId64, name: p.user.name }))}
+            connectAddress={serverConfig?.gameConnectAddress || null}
+          />
+          {canHost && (
+            <div className="flex justify-center">
+              <CancelMatchButton />
+            </div>
+          )}
+        </div>
       )}
 
       {/* Waiting pool: pinned to the viewport edge on large screens so it

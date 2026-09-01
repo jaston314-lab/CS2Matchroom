@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { getSteamLoginUrl } from "@/lib/steam";
+import { getAppPublicUrl } from "@/lib/appUrl";
 
-function redirectTo(path: string) {
-  const base = (process.env.APP_PUBLIC_URL ?? "http://localhost:3000").replace(/\/$/, "");
+async function redirectTo(path: string) {
+  const base = await getAppPublicUrl();
   return NextResponse.redirect(`${base}${path}`);
 }
 

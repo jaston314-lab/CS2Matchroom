@@ -13,17 +13,19 @@ export interface BuildMatchConfigInput {
   matchzyMatchId: string;
 }
 
-/** SteamID64 -> display name, for the players a given team roster needs. */
+/**
+ * SteamID64 -> display name, for everyone (players and coaches alike) a
+ * given team roster needs. Unlike Get5, MatchZy has no separate "coaches"
+ * config key it actually reads — its own docs say so explicitly: a coach
+ * has to be listed under "players" like anyone else, and only becomes a
+ * coach in-game by running `.coach <side>` after connecting. Listing a
+ * coach only in a "coaches" key (as this used to do) means their SteamID
+ * never appears anywhere MatchZy checks, so they get kicked on connect
+ * regardless of what they type.
+ */
 function playerMap(players: RoomPlayerWithUser[], team: "A" | "B"): Record<string, string> {
   return Object.fromEntries(
-    players.filter((p) => p.team === team && !p.isCoach).map((p) => [p.user.steamId64, p.user.name]),
-  );
-}
-
-/** SteamID64 -> display name, for the coach(es) assigned to a given team. */
-function coachMap(players: RoomPlayerWithUser[], team: "A" | "B"): Record<string, string> {
-  return Object.fromEntries(
-    players.filter((p) => p.team === team && p.isCoach).map((p) => [p.user.steamId64, p.user.name]),
+    players.filter((p) => p.team === team).map((p) => [p.user.steamId64, p.user.name]),
   );
 }
 
@@ -54,7 +56,9 @@ export function buildMatchConfig(input: BuildMatchConfigInput): Record<string, u
   const coachesPerTeam = Math.max(coachesA, coachesB);
 
   const config: Record<string, unknown> = {
-    matchid: matchzyMatchId,
+    // Sent as a real JSON number, not a string — MatchZy's LoadMatchDataCommand
+    // rejects a quoted matchid with "matchid should be an integer!".
+    matchid: Number(matchzyMatchId),
     match_title: room.label,
     num_maps: numMaps,
     players_per_team: playersPerTeam,
@@ -66,12 +70,10 @@ export function buildMatchConfig(input: BuildMatchConfigInput): Record<string, u
     team1: {
       name: room.teamAName,
       players: playerMap(roomPlayers, "A"),
-      coaches: coachMap(roomPlayers, "A"),
     },
     team2: {
       name: room.teamBName,
       players: playerMap(roomPlayers, "B"),
-      coaches: coachMap(roomPlayers, "B"),
     },
     maplist: mapList,
     cvars: {

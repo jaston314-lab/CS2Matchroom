@@ -37,7 +37,7 @@ const baseInput: BuildMatchConfigInput = {
     roomPlayer("4", "B") as never,
   ],
   mapList: ["de_mirage"],
-  matchzyMatchId: "test-match-1",
+  matchzyMatchId: "1700000000",
 };
 
 describe("buildMatchConfig", () => {
@@ -46,15 +46,13 @@ describe("buildMatchConfig", () => {
     expect(config.team1).toEqual({
       name: "Team A",
       players: { "1": "Player 1", "2": "Player 2" },
-      coaches: {},
     });
     expect(config.team2).toEqual({
       name: "Team B",
       players: { "3": "Player 3", "4": "Player 4" },
-      coaches: {},
     });
     expect(config.maplist).toEqual(["de_mirage"]);
-    expect(config.matchid).toBe("test-match-1");
+    expect(config.matchid).toBe(1700000000);
     expect(config.players_per_team).toBe(2);
     expect(config.min_players_to_ready).toBe(2);
     expect(config.coaches_per_team).toBe(0);
@@ -72,7 +70,7 @@ describe("buildMatchConfig", () => {
     expect(config.min_players_to_ready).toBe(3);
   });
 
-  it("puts a coach in the coaches map, excluded from the players map", () => {
+  it("includes a coach in the players map too — MatchZy has no separate coaches key, coaches must be listed as players and use .coach in-game", () => {
     const config = buildMatchConfig({
       ...baseInput,
       roomPlayers: [
@@ -82,8 +80,7 @@ describe("buildMatchConfig", () => {
     });
     expect(config.team1).toEqual({
       name: "Team A",
-      players: { "1": "Player 1", "2": "Player 2" },
-      coaches: { "5": "Player 5" },
+      players: { "1": "Player 1", "2": "Player 2", "5": "Player 5" },
     });
   });
 
