@@ -8,6 +8,15 @@ RUN npm ci
 
 COPY . .
 RUN npx prisma generate
+
+# `next build` statically imports every route module (including
+# src/lib/db.ts, transitively) just to collect its exported config — it
+# never actually queries the DB at build time. db.ts constructs a real
+# Prisma client at import time and throws if DATABASE_URL isn't set, so
+# the build needs *some* value here even though it's never connected to.
+# The real one is only supplied at container runtime, via docker-compose.
+# /tmp is outside /app, so nothing from this lands in the final image.
+ENV DATABASE_URL="file:/tmp/build-time-placeholder.db"
 RUN npm run build
 
 FROM node:22-bookworm-slim
