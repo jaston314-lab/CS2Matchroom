@@ -101,6 +101,37 @@ export async function resolveRatingsForRoom(
   return new Map(resolved.map((r) => [r.steamId64, r]));
 }
 
+// ---- Roster filters for Scramble/Balance (pure, unit-tested in
+// rating.test.ts) ----
+//
+// Both actions.ts's scrambleTeams and balanceTeamsAction used to inline
+// their own "who's eligible" filter directly against room.players, and
+// both independently forgot to exclude coaches — Balance could reassign a
+// team's coach to the other team as a regular player, landing two coaches
+// on one side. Pulling the filters out here means there's exactly one
+// place that decides "who counts as a movable competitive player", it's
+// covered by tests, and a future third caller can't repeat the mistake.
+
+export interface RosterEntry {
+  id: string;
+  team: string;
+  isCaptain: boolean;
+  isCoach: boolean;
+}
+
+/** Scramble's movable pool: on a team, not a coach, and not a captain
+ * (captains stay put as each team's anchor). */
+export function scrambleCandidates<T extends RosterEntry>(players: T[]): T[] {
+  return players.filter((p) => (p.team === "A" || p.team === "B") && !p.isCaptain && !p.isCoach);
+}
+
+/** Balance's rateable pool: on a team, not a coach. Captains ARE included
+ * here (unlike scramble) — balanceTeams below anchors on them itself and
+ * needs their rating to do it. */
+export function balanceCandidates<T extends RosterEntry>(players: T[]): T[] {
+  return players.filter((p) => (p.team === "A" || p.team === "B") && !p.isCoach);
+}
+
 // ---- Balance algorithm (pure, unit-tested in rating.test.ts) ----
 
 export interface BalanceEntry {
@@ -137,10 +168,19 @@ export function balanceTeams(entries: BalanceEntry[]): Map<string, "A" | "B"> {
   let totalA = captainA ? (captainA.rating ?? fallback) : 0;
   let totalB = captainB ? (captainB.rating ?? fallback) : 0;
 
+  // Processing order is jittered (±15% of each player's rating) so mashing
+  // the Balance button repeatedly actually explores different splits
+  // instead of recomputing the exact same one every time — the greedy
+  // assignment below still runs on *real* ratings, so overall balance
+  // quality doesn't suffer, only which near-equally-rated player lands on
+  // which side. The jitter is computed once per player up front, not
+  // inside the comparator, so the sort stays a valid strict-weak-order
+  // (recomputing it per-comparison would make .sort's behavior undefined).
   const movable = onATeam
     .filter((e) => e.roomPlayerId !== captainA?.roomPlayerId && e.roomPlayerId !== captainB?.roomPlayerId)
     .map((e) => ({ ...e, rating: e.rating ?? fallback }))
-    .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
+    .map((e) => ({ ...e, sortKey: (e.rating ?? 0) * (1 + (Math.random() - 0.5) * 0.3) }))
+    .sort((a, b) => b.sortKey - a.sortKey);
 
   for (const player of movable) {
     if (totalA <= totalB) {

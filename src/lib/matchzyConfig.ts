@@ -11,6 +11,13 @@ export interface BuildMatchConfigInput {
   roomPlayers: RoomPlayerWithUser[];
   mapList: string[];
   matchzyMatchId: string;
+  /** Who won the "didn't get the last map pick" side choice (or the
+   * coin flip, if there was no veto to react to) and which side they
+   * picked — see chooseSideAction/sideChoiceTeamFromSteps. Only used when
+   * the room has no knife round; null falls back to the old fixed
+   * alternation (team1 starts CT on map 1) — e.g. a host starting the
+   * match before anyone actually made a choice. */
+  sideChoice?: { team: "A" | "B"; side: "CT" | "T" } | null;
 }
 
 /**
@@ -35,7 +42,7 @@ function playerMap(players: RoomPlayerWithUser[], team: "A" | "B"): Record<strin
  * and me.sivert.io for the schema/side_type semantics.
  */
 export function buildMatchConfig(input: BuildMatchConfigInput): Record<string, unknown> {
-  const { room, roomPlayers, mapList, matchzyMatchId } = input;
+  const { room, roomPlayers, mapList, matchzyMatchId, sideChoice } = input;
   const format = room.format as Format;
   const numMaps = mapsRequiredForFormat(format);
 
@@ -79,6 +86,20 @@ export function buildMatchConfig(input: BuildMatchConfigInput): Record<string, u
     cvars: {
       hostname: `${room.label} — CS2 Matchroom`,
       mp_overtime_enable: room.overtimeEnabled ? "1" : "0",
+      // Skips CS2's own team-choice menu on connect — players get
+      // auto-assigned a side instead of having to pick one. MatchZy's own
+      // roster-based ChangeTeam() (it already runs on every connect once a
+      // match is loaded) then corrects anyone onto their actual configured
+      // team1/team2 side shortly after, so the auto-assignment here never
+      // needs to be "correct", just immediate — the knife round is what
+      // actually decides starting sides anyway.
+      mp_force_assign_teams: "1",
+      // Marks each player ready the moment they connect instead of
+      // requiring everyone to type .ready — once both teams hit
+      // min_players_to_ready below, MatchZy moves out of warmup on its
+      // own, so this is what turns "wait for everyone to ready up" into
+      // "wait for everyone to join".
+      matchzy_autoready_enabled: "1",
     },
   };
 
@@ -86,8 +107,14 @@ export function buildMatchConfig(input: BuildMatchConfigInput): Record<string, u
     config.side_type = "standard"; // knife round decides starting sides each map
   } else {
     config.side_type = "never_knife";
-    // Deterministic alternating sides per map since there's no knife round.
-    config.map_sides = mapList.map((_, i) => (i % 2 === 0 ? "team1_ct" : "team2_ct"));
+    // Whoever won the side choice (see BuildMatchConfigInput.sideChoice)
+    // picked CT or T for map 1 — team1StartsCt says whether that lands
+    // team1 (Team A) on CT for that map. No choice recorded (e.g. host
+    // started before anyone picked) falls back to the old fixed default:
+    // team1 starts CT on map 1. Later maps just keep alternating from
+    // whichever side map 1 landed on.
+    const team1StartsCt = sideChoice ? (sideChoice.team === "A") === (sideChoice.side === "CT") : true;
+    config.map_sides = mapList.map((_, i) => ((i % 2 === 0) === team1StartsCt ? "team1_ct" : "team2_ct"));
   }
 
   if (room.simulation) {

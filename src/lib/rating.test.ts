@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { balanceTeams, type BalanceEntry } from "./rating";
+import {
+  balanceTeams,
+  scrambleCandidates,
+  balanceCandidates,
+  type BalanceEntry,
+  type RosterEntry,
+} from "./rating";
 
 function entry(overrides: Partial<BalanceEntry>): BalanceEntry {
   return {
@@ -11,6 +17,76 @@ function entry(overrides: Partial<BalanceEntry>): BalanceEntry {
     ...overrides,
   };
 }
+
+function roster(overrides: Partial<RosterEntry>): RosterEntry {
+  return {
+    id: overrides.id ?? Math.random().toString(36),
+    team: "A",
+    isCaptain: false,
+    isCoach: false,
+    ...overrides,
+  };
+}
+
+// Regression coverage for the exact bug: Scramble and Balance both used to
+// inline their own "who's eligible" filter and both forgot to exclude
+// coaches — Balance could reassign a team's coach to the other team as a
+// regular player, landing two coaches on one side.
+describe("scrambleCandidates", () => {
+  it("excludes coaches", () => {
+    const players = [
+      roster({ id: "p1", team: "A" }),
+      roster({ id: "coachA", team: "A", isCoach: true }),
+      roster({ id: "coachB", team: "B", isCoach: true }),
+    ];
+    const ids = scrambleCandidates(players).map((p) => p.id);
+    expect(ids).not.toContain("coachA");
+    expect(ids).not.toContain("coachB");
+    expect(ids).toContain("p1");
+  });
+
+  it("excludes captains", () => {
+    const players = [roster({ id: "cap", team: "A", isCaptain: true }), roster({ id: "p1", team: "A" })];
+    const ids = scrambleCandidates(players).map((p) => p.id);
+    expect(ids).not.toContain("cap");
+    expect(ids).toContain("p1");
+  });
+
+  it("excludes players not on a team", () => {
+    const players = [roster({ id: "pooled", team: "UNASSIGNED" }), roster({ id: "p1", team: "B" })];
+    const ids = scrambleCandidates(players).map((p) => p.id);
+    expect(ids).not.toContain("pooled");
+    expect(ids).toContain("p1");
+  });
+});
+
+describe("balanceCandidates", () => {
+  it("excludes coaches", () => {
+    const players = [
+      roster({ id: "p1", team: "A" }),
+      roster({ id: "coachA", team: "A", isCoach: true }),
+      roster({ id: "coachB", team: "B", isCoach: true }),
+    ];
+    const ids = balanceCandidates(players).map((p) => p.id);
+    expect(ids).not.toContain("coachA");
+    expect(ids).not.toContain("coachB");
+    expect(ids).toContain("p1");
+  });
+
+  it("keeps captains (unlike scrambleCandidates) — balanceTeams anchors on them", () => {
+    const players = [roster({ id: "cap", team: "A", isCaptain: true }), roster({ id: "p1", team: "A" })];
+    const ids = balanceCandidates(players).map((p) => p.id);
+    expect(ids).toContain("cap");
+    expect(ids).toContain("p1");
+  });
+
+  it("excludes players not on a team", () => {
+    const players = [roster({ id: "pooled", team: "UNASSIGNED" }), roster({ id: "p1", team: "B" })];
+    const ids = balanceCandidates(players).map((p) => p.id);
+    expect(ids).not.toContain("pooled");
+    expect(ids).toContain("p1");
+  });
+});
 
 describe("balanceTeams", () => {
   it("keeps captains on their team and balances the rest by rating", () => {

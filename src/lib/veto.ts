@@ -41,3 +41,19 @@ export function applyBan(state: VetoState, team: "A" | "B", map: string, numMaps
 
   return { pool, steps, nextTeam, done, finalMapList: done ? pool : null };
 }
+
+/**
+ * Only relevant when there's no knife round to decide starting sides.
+ * Whoever cast the LAST ban effectively chose what survived (eliminating
+ * one of the last two maps is the same as picking the other one) — so
+ * their opponent gets the consolation of choosing a side instead. Returns
+ * null when the veto resolved with zero bans at all (the pool already
+ * matched the format's map count — e.g. a single map picked directly) —
+ * there's no "last picker" to react against, so the caller should resolve
+ * that case with a coin flip instead.
+ */
+export function sideChoiceTeamFromSteps(steps: VetoStep[]): "A" | "B" | null {
+  if (steps.length === 0) return null;
+  const lastBanner = steps[steps.length - 1].team;
+  return lastBanner === "A" ? "B" : "A";
+}

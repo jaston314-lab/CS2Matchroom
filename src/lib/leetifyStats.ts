@@ -136,12 +136,49 @@ export async function fetchLeetifyMatchStats(steamId64: string): Promise<Leetify
   return value;
 }
 
+/**
+ * Deterministic (not random-every-refresh, so it doesn't flicker on the
+ * page's 3s auto-refresh) placeholder stat line for test-mode bots — they
+ * have no real Leetify profile behind their fake Steam ID, so without this
+ * they'd render with no stats line at all. Never used for a real player:
+ * see the isBot check at the call site below.
+ */
+function fakeStatsForBot(steamId64: string): LeetifyMatchStats {
+  let hash = 0;
+  for (let i = 0; i < steamId64.length; i++) hash = (hash * 31 + steamId64.charCodeAt(i)) | 0;
+  const rand = (min: number, max: number, salt: number) => {
+    const x = Math.sin(hash + salt) * 10000;
+    const frac = x - Math.floor(x);
+    return min + frac * (max - min);
+  };
+  const kills = Math.round(rand(10, 24, 1));
+  const deaths = Math.round(rand(10, 22, 2));
+  const assists = Math.round(rand(2, 9, 3));
+  const swingPct = rand(-8, 8, 4);
+  return {
+    matchesCounted: 30,
+    winPct: rand(25, 65, 5),
+    rating: 1 + swingPct / 100,
+    swingPct,
+    kills,
+    deaths,
+    assists,
+    kd: deaths > 0 ? kills / deaths : kills,
+    kpr: rand(0.55, 0.85, 6),
+    adr: rand(55, 95, 7),
+  };
+}
+
 export async function fetchLeetifyMatchStatsForRoom(
-  steamId64s: string[],
+  players: { steamId64: string; isBot: boolean }[],
 ): Promise<Map<string, LeetifyMatchStats | null>> {
-  const unique = Array.from(new Set(steamId64s));
+  const unique = new Map(players.map((p) => [p.steamId64, p.isBot]));
   const resolved = await Promise.all(
-    unique.map(async (id) => [id, await fetchLeetifyMatchStats(id)] as const),
+    Array.from(unique, async ([steamId64, isBot]) => {
+      const real = await fetchLeetifyMatchStats(steamId64);
+      if (real === null && isBot) return [steamId64, fakeStatsForBot(steamId64)] as const;
+      return [steamId64, real] as const;
+    }),
   );
   return new Map(resolved);
 }

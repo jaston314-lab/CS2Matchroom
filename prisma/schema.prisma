@@ -23,13 +23,22 @@ model User {
 
   wins          Int          @default(0)
   losses        Int          @default(0)
-  // Placeholder player created by "fill with bots" in test mode — never
-  // logs in, excluded from the Players Lounge leaderboard.
+  // A genuine synthetic identity — "fill with bots" test mode, fake
+  // SteamID, will never actually log in. NOT the same as isPlaceholder
+  // below (a real person can be a placeholder without being a bot).
   isBot         Boolean      @default(false)
+  // Row exists but nobody's actually logged in and been invited yet —
+  // "fill with bots" test accounts, and real people who showed up in an
+  // imported demo but haven't joined for real. Excluded from Players
+  // Lounge/Admin Users, and the Steam callback routes them through the
+  // invite flow instead of auto-logging them in (see submitInviteCode,
+  // which promotes the row on success instead of creating a duplicate).
+  isPlaceholder Boolean      @default(false)
 
   hostedRooms   Room[]       @relation("RoomHost")
   roomPlayers   RoomPlayer[]
   matchStats    MatchPlayerStats[]
+  chatMessages  ChatMessage[]
 }
 
 // At most one non-terminal (status not COMPLETED/CANCELLED) Room should
@@ -53,12 +62,33 @@ model Room {
   // configured SteamIDs and auto-plays the match, for testing the
   // RCON/webhook pipeline without needing real players connected.
   simulation        Boolean  @default(false)
+  // Host-controlled — while true, players can't self-switch teams via
+  // setTeam (see actions.ts). Host tools (unassignPlayer, assignCaptain,
+  // assignCoach) are unaffected, same as every other host override
+  // elsewhere in this app.
+  teamsLocked       Boolean  @default(false)
   createdAt         DateTime @default(now())
 
-  players RoomPlayer[]
-  veto    Veto?
-  draft   Draft?
-  match   Match?
+  players      RoomPlayer[]
+  veto         Veto?
+  draft        Draft?
+  match        Match?
+  chatMessages ChatMessage[]
+}
+
+// Lightweight room-scoped chat — polled the same way as everything else on
+// the matchroom page (see AutoRefresh), no websocket layer. Good enough for
+// a casual crew; latency is however often AutoRefresh's interval is.
+model ChatMessage {
+  id        String   @id @default(cuid())
+  roomId    String
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([roomId, createdAt])
 }
 
 model RoomPlayer {
@@ -72,6 +102,10 @@ model RoomPlayer {
   isCoach   Boolean  @default(false) // mutually exclusive with isCaptain, enforced in the toggle actions
   isReady   Boolean  @default(false)
   joinedAt  DateTime @default(now())
+  // Bumped by a client-side heartbeat while the matchroom page is open —
+  // there's no websocket/presence layer, so this is how we tell "closed
+  // the tab" apart from "still here". See PresenceHeartbeat.tsx.
+  lastSeenAt DateTime @default(now())
 
   @@unique([roomId, userId])
 }
@@ -84,7 +118,16 @@ model Veto {
   steps            String   @default("[]") // JSON array of {team, map, action} ban/pick log
   finalMapList     String?  // JSON array of resolved map names, in play order
   overriddenByHost Boolean  @default(false)
-  updatedAt        DateTime @updatedAt
+  // Only meaningful when Room.knifeRound is false — there's no in-game
+  // knife round to decide starting sides, so instead: whichever team did
+  // NOT make the deciding ban gets to choose (they didn't get the last
+  // map pick, so they get the side pick instead). If the veto resolved
+  // with zero bans at all (a single map picked directly, no elimination
+  // to react to), sideChoiceTeam is instead a coin-flip result — see
+  // sideChoiceTeamFromSteps in lib/veto.ts.
+  sideChoiceTeam String? // "A" | "B" | null
+  chosenSide     String? // "CT" | "T" | null — set once sideChoiceTeam actually picks
+  updatedAt      DateTime @updatedAt
 }
 
 // Only relevant when Room.mode === "CAPTAIN_DRAFT". Parallel shape to Veto.

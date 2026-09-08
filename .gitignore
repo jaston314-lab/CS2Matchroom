@@ -46,4 +46,6 @@ next-env.d.ts
 # sqlite dev database + docker volume mount point
 /dev.db
 /dev.db-journal
+/prisma/dev.db
+/prisma/dev.db-journal
 /data

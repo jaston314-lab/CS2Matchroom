@@ -14,7 +14,7 @@ export default async function InvitePage() {
             One more step
           </p>
           <h1 className="text-3xl font-bold tracking-tight">Almost there</h1>
-          <p className="text-neutral-400 text-sm leading-relaxed">
+          <p className="text-muted text-sm leading-relaxed">
             We don&apos;t recognize that Steam account yet. If you were invited, enter the code
             you were given to finish creating your account.
           </p>
@@ -27,7 +27,7 @@ export default async function InvitePage() {
             required
             maxLength={8}
             autoFocus
-            className="w-full rounded-xl bg-neutral-900 border border-neutral-700 px-4 py-3 text-center text-lg uppercase tracking-[0.4em] placeholder:tracking-normal placeholder:text-neutral-600 focus:border-blue-500 focus:outline-none"
+            className="w-full rounded-xl bg-input border border-line px-4 py-3 text-center text-lg uppercase tracking-[0.4em] placeholder:tracking-normal placeholder:text-muted/70 focus:border-blue-500 focus:outline-none"
           />
           <button
             type="submit"
@@ -37,7 +37,7 @@ export default async function InvitePage() {
           </button>
         </form>
 
-        <p className="text-xs text-neutral-600">
+        <p className="text-xs text-muted/70">
           Wrong code, or don&apos;t have one? Submitting anything invalid signs you back out.
         </p>
       </div>

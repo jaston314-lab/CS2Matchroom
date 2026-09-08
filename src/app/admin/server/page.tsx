@@ -33,8 +33,8 @@ export default async function AdminServerPage({
       {params.inviteRegenerated && <Banner tone="ok">Invite code regenerated.</Banner>}
 
       <section className="rounded-xl border border-blue-800/60 bg-blue-950/10 p-4 space-y-2">
-        <h2 className="text-sm font-medium text-neutral-300">Invite code</h2>
-        <p className="text-xs text-neutral-500">
+        <h2 className="text-sm font-medium text-ink">Invite code</h2>
+        <p className="text-xs text-muted">
           Required to create a brand-new account — existing members log back in freely. Hosts can
           see this on the matchroom page; regenerating invalidates it for anyone who hasn&apos;t signed
           up yet.
@@ -44,7 +44,7 @@ export default async function AdminServerPage({
             {config?.inviteCode || <span className="text-yellow-500 text-sm">Not set</span>}
           </span>
           <form action={regenerateInviteCodeAction}>
-            <button className="rounded-lg border border-neutral-700 px-3 py-1.5 text-sm hover:border-blue-500 transition-colors">
+            <button className="rounded-lg border border-line px-3 py-1.5 text-sm hover:border-blue-500 transition-colors">
               {config?.inviteCode ? "Regenerate" : "Generate"}
             </button>
           </form>
@@ -67,8 +67,8 @@ export default async function AdminServerPage({
         />
         <Field label="RCON port" name="rconPort" type="number" defaultValue={String(config?.rconPort ?? 27015)} />
         <div>
-          <label className="block text-sm text-neutral-300 mb-1" htmlFor="rconPassword">
-            RCON password {hasPassword && <span className="text-neutral-500">(currently set — leave blank to keep it)</span>}
+          <label className="block text-sm text-ink mb-1" htmlFor="rconPassword">
+            RCON password {hasPassword && <span className="text-muted">(currently set — leave blank to keep it)</span>}
           </label>
           <input
             id="rconPassword"
@@ -77,7 +77,7 @@ export default async function AdminServerPage({
             autoComplete="new-password"
             data-lpignore="true"
             data-1p-ignore="true"
-            className="w-full rounded-lg bg-neutral-900 border border-neutral-700 px-3 py-2 focus:border-blue-500 focus:outline-none"
+            className="w-full rounded-lg bg-input border border-line px-3 py-2 focus:border-blue-500 focus:outline-none"
           />
         </div>
         <Field
@@ -108,14 +108,14 @@ export default async function AdminServerPage({
         <div className="flex gap-3 pt-2">
           <button
             type="submit"
-            className="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-2 text-white font-medium transition-colors"
+            className="rounded-lg bg-accent-blue hover:bg-accent-blue-hover px-4 py-2 text-white font-medium transition-colors"
           >
             Save &amp; apply
           </button>
           <button
             type="submit"
             formAction={testRconConnectionAction}
-            className="rounded-lg border border-neutral-700 px-4 py-2 hover:border-blue-500 transition-colors"
+            className="rounded-lg border border-line px-4 py-2 hover:border-blue-500 transition-colors"
           >
             Test RCON connection
           </button>
@@ -146,7 +146,7 @@ function Field({
 }) {
   return (
     <div>
-      <label className="block text-sm text-neutral-300 mb-1" htmlFor={name}>
+      <label className="block text-sm text-ink mb-1" htmlFor={name}>
         {label}
       </label>
       <input
@@ -157,9 +157,9 @@ function Field({
         autoComplete="off"
         data-lpignore="true"
         data-1p-ignore="true"
-        className="w-full rounded-lg bg-neutral-900 border border-neutral-700 px-3 py-2 focus:border-blue-500 focus:outline-none"
+        className="w-full rounded-lg bg-input border border-line px-3 py-2 focus:border-blue-500 focus:outline-none"
       />
-      {hint && <p className="text-xs text-neutral-500 mt-1">{hint}</p>}
+      {hint && <p className="text-xs text-muted mt-1">{hint}</p>}
     </div>
   );
 }
@@ -183,9 +183,9 @@ function ConsoleCommands({
 }) {
   if (!appPublicUrl || !webhookSharedSecret) {
     return (
-      <section className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-4 space-y-1.5 text-sm">
-        <h2 className="font-medium text-neutral-300">Pelican console commands</h2>
-        <p className="text-neutral-500 text-xs">
+      <section className="rounded-xl border border-line bg-panel p-4 space-y-1.5 text-sm">
+        <h2 className="font-medium text-ink">Pelican console commands</h2>
+        <p className="text-muted text-xs">
           Fill in and save &quot;Webhook shared secret&quot; and &quot;App public URL&quot; above first — the exact
           commands to paste into the server console will appear here once both are set.
         </p>
@@ -212,18 +212,18 @@ function ConsoleCommands({
 
   return (
     <section className="rounded-xl border border-blue-800/60 bg-blue-950/10 p-4 space-y-2">
-      <h2 className="text-sm font-medium text-neutral-300">Pelican console commands</h2>
-      <p className="text-xs text-neutral-500">
+      <h2 className="text-sm font-medium text-ink">Pelican console commands</h2>
+      <p className="text-xs text-muted">
         One-time setup — paste these into the server&apos;s console in Pelican. Only needs re-running
         if the webhook secret or public URL above change (e.g. moving to a new domain/server).{" "}
-        <span className="text-neutral-400">
+        <span className="text-muted">
           &quot;Save &amp; apply&quot; above already tries to run these for you automatically over RCON — this
           is only here for when you&apos;d rather do it yourself, or RCON isn&apos;t reachable from wherever
           this app runs.
         </span>
       </p>
-      <div className="rounded-lg bg-neutral-950 border border-neutral-800 p-3 space-y-2">
-        <pre className="text-xs text-neutral-300 whitespace-pre-wrap break-all font-mono">{commands}</pre>
+      <div className="rounded-lg bg-app border border-line p-3 space-y-2">
+        <pre className="text-xs text-ink whitespace-pre-wrap break-all font-mono">{commands}</pre>
         <CopyButton text={commands} label="Copy commands" />
       </div>
     </section>
@@ -237,22 +237,22 @@ function ConsoleCommands({
  */
 function SetupGuide() {
   return (
-    <details className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-4 text-sm">
-      <summary className="cursor-pointer font-medium text-neutral-200">
+    <details className="rounded-xl border border-line bg-panel p-4 text-sm">
+      <summary className="cursor-pointer font-medium text-ink">
         Connecting this app to a CS2 server — setup guide
       </summary>
-      <ol className="mt-3 space-y-4 list-decimal list-inside text-neutral-300">
+      <ol className="mt-3 space-y-4 list-decimal list-inside text-ink">
         <li>
           <span className="font-medium">On the CS2 server:</span>{" "}
-          <span className="text-neutral-400">
+          <span className="text-muted">
             the MatchZy Enhanced plugin must be installed, and RCON enabled (an{" "}
-            <code className="text-neutral-300">rcon_password</code> set on the server). Note the RCON
+            <code className="text-ink">rcon_password</code> set on the server). Note the RCON
             host/port — usually the same host/port as the game server itself, but it can differ.
           </span>
         </li>
         <li>
           <span className="font-medium">Fill in everything below and save</span> —{" "}
-          <span className="text-neutral-400">
+          <span className="text-muted">
             RCON host/port/password, a webhook shared secret (any random string), and the &quot;App
             public URL&quot; this app is reachable at. That last one is the only address that matters
             anywhere in this app — it&apos;s used for both Steam sign-in and the CS2 server&apos;s match
@@ -261,11 +261,11 @@ function SetupGuide() {
         </li>
         <li>
           <span className="font-medium">Use &quot;Test RCON connection&quot;</span>{" "}
-          <span className="text-neutral-400">to confirm the app can actually reach the server before relying on it.</span>
+          <span className="text-muted">to confirm the app can actually reach the server before relying on it.</span>
         </li>
         <li>
           <span className="font-medium">Press &quot;Save &amp; apply&quot;.</span>{" "}
-          <span className="text-neutral-400">
+          <span className="text-muted">
             This does two things: saves your settings, and tries to push the one-time MatchZy setup
             convars to the server over RCON automatically. If that works, you&apos;re done. If RCON isn&apos;t
             reachable from wherever this app runs (common with some game-host setups), you&apos;ll see a
@@ -276,7 +276,7 @@ function SetupGuide() {
         </li>
         <li>
           <span className="font-medium">That&apos;s the entire one-time setup.</span>{" "}
-          <span className="text-neutral-400">
+          <span className="text-muted">
             RCON still needs to work for actual live matches (loading/ending a match when a host
             presses Start) — that happens automatically from this app each time, there&apos;s nothing to
             paste for that part. If you ever switch to a different server or domain, come back to

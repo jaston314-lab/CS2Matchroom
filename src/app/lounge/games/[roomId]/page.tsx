@@ -29,11 +29,11 @@ export default async function GameDetailPage({ params }: { params: Promise<{ roo
         </Link>
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold">{room.label}</h1>
-          <p className="text-sm text-neutral-400">
+          <p className="text-sm text-muted">
             {match.team1Score}–{match.team2Score} · {room.createdAt.toLocaleDateString()}
           </p>
         </div>
-        <p className="text-sm text-neutral-500">
+        <p className="text-sm text-muted">
           Player stats aren&apos;t in yet — the server uploads the demo once the map ends, and it can take a
           minute to get parsed. Refresh in a bit.
         </p>
@@ -55,7 +55,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ roo
           {match.currentMap ? mapLabel(match.currentMap) : room.label}
         </p>
         <h1 className="text-2xl font-semibold">{room.label}</h1>
-        <p className="text-sm text-neutral-400">
+        <p className="text-sm text-muted">
           {winnerName && <span className="text-emerald-400 font-medium">{winnerName} won</span>}
           {winnerName && " · "}
           {match.team1Score}–{match.team2Score} · {room.createdAt.toLocaleDateString()}
@@ -67,7 +67,7 @@ export default async function GameDetailPage({ params }: { params: Promise<{ roo
         <TeamBoxScore name={room.teamBName} rounds={match.team2Score} stats={teamB} isWinner={match.winnerTeam === "B"} />
       </div>
 
-      <p className="text-xs text-neutral-600 text-center">
+      <p className="text-xs text-muted/70 text-center">
         Stats parsed from the match demo — kills, deaths, assists, MVPs, and damage come straight from
         CS2&apos;s own tracked scoreboard data.
       </p>
@@ -103,18 +103,18 @@ function TeamBoxScore({
   return (
     <section
       className={`rounded-xl border p-4 space-y-3 ${
-        isWinner ? "border-emerald-700 bg-emerald-950/10" : "border-neutral-800 bg-neutral-900/50"
+        isWinner ? "border-emerald-700 bg-emerald-950/10" : "border-line bg-panel"
       }`}
     >
       <div className="flex items-center justify-between">
         <h2 className="font-semibold truncate">{name}</h2>
-        <span className={`text-lg font-bold tabular-nums ${isWinner ? "text-emerald-400" : "text-neutral-400"}`}>
+        <span className={`text-lg font-bold tabular-nums ${isWinner ? "text-emerald-400" : "text-muted"}`}>
           {rounds}
         </span>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="text-neutral-500 text-xs uppercase tracking-wide">
+          <thead className="text-muted text-xs uppercase tracking-wide">
             <tr>
               <th className="text-left font-medium pb-1.5">Player</th>
               <th className="text-right font-medium pb-1.5">K</th>
@@ -126,7 +126,7 @@ function TeamBoxScore({
               <th className="text-right font-medium pb-1.5">Damage</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-neutral-800/60">
+          <tbody className="divide-y divide-line/60">
             {stats.map((s) => {
               const adr = s.roundsPlayed > 0 ? s.damage / s.roundsPlayed : 0;
               const hsPct = s.kills > 0 ? (s.headshotKills / s.kills) * 100 : 0;

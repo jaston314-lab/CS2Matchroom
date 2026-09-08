@@ -29,7 +29,7 @@ export default async function LoginPage({
           <h1 className="text-4xl font-bold tracking-tight">
             <span className="text-blue-500">CS2</span> Matchroom
           </h1>
-          <p className="text-neutral-400 text-sm leading-relaxed">
+          <p className="text-muted text-sm leading-relaxed">
             Casual 5v5s with the crew. Sign in with Steam, ready up, and the match loads straight
             onto the server.
           </p>
@@ -43,13 +43,13 @@ export default async function LoginPage({
 
         <a
           href="/api/auth/steam/login"
-          className="group inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-500 px-5 py-3 text-white font-semibold shadow-lg shadow-blue-950/50 transition-colors"
+          className="group inline-flex w-full items-center justify-center gap-2 rounded-xl bg-accent-blue hover:bg-accent-blue-hover px-5 py-3 text-white font-semibold shadow-lg shadow-blue-950/50 transition-colors"
         >
           <SignInGlyph />
           Sign in through Steam
         </a>
 
-        <p className="text-xs text-neutral-600">
+        <p className="text-xs text-muted/70">
           Already a member? Just sign in. New here? You&apos;ll be asked for an invite code after
           connecting your Steam account.
         </p>

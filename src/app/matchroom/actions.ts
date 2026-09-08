@@ -15,9 +15,15 @@ import {
 } from "@/lib/types";
 import { AVAILABLE_MAPS } from "@/lib/maps";
 import { DEFAULT_ROOM_SETTINGS } from "@/lib/roomDefaults";
-import { startVeto, applyBan } from "@/lib/veto";
+import { startVeto, applyBan, sideChoiceTeamFromSteps } from "@/lib/veto";
 import { startDraft, applyPick, computeNextTeam } from "@/lib/draft";
-import { balanceTeams, resolveRatingsForRoom, type BalanceEntry } from "@/lib/rating";
+import {
+  balanceTeams,
+  resolveRatingsForRoom,
+  scrambleCandidates,
+  balanceCandidates,
+  type BalanceEntry,
+} from "@/lib/rating";
 import { buildMatchConfig } from "@/lib/matchzyConfig";
 import { getServerConfig, loadMatch, endMatch } from "@/lib/rcon";
 import type { Room } from "@/generated/prisma/client";
@@ -51,10 +57,19 @@ function revalidateMatchroom() {
   revalidatePath("/matchroom");
 }
 
-async function startVetoForRoom(room: Pick<Room, "id" | "mapPool" | "format">) {
+async function startVetoForRoom(room: Pick<Room, "id" | "mapPool" | "format" | "knifeRound">) {
   const mapPool = JSON.parse(room.mapPool) as string[];
   const required = mapsRequiredForFormat(room.format as Format);
   const state = startVeto(mapPool, "A", required);
+
+  // No knife round to decide starting sides — if this resolved with zero
+  // bans (the pool already matched the format's map count, e.g. a single
+  // map picked directly), there's no "last picker" to react against, so
+  // flip a coin instead. See sideChoiceTeamFromSteps.
+  const sideChoiceTeam =
+    state.done && !room.knifeRound
+      ? (sideChoiceTeamFromSteps(state.steps) ?? (Math.random() < 0.5 ? "A" : "B"))
+      : null;
 
   await db.veto.upsert({
     where: { roomId: room.id },
@@ -63,12 +78,15 @@ async function startVetoForRoom(room: Pick<Room, "id" | "mapPool" | "format">) {
       steps: JSON.stringify(state.steps),
       finalMapList: state.finalMapList ? JSON.stringify(state.finalMapList) : null,
       overriddenByHost: false,
+      sideChoiceTeam,
+      chosenSide: null,
     },
     create: {
       roomId: room.id,
       status: state.done ? "DONE" : "IN_PROGRESS",
       steps: JSON.stringify(state.steps),
       finalMapList: state.finalMapList ? JSON.stringify(state.finalMapList) : null,
+      sideChoiceTeam,
     },
   });
   await db.room.update({
@@ -165,6 +183,45 @@ export async function leaveLobby(): Promise<void> {
   revalidateMatchroom();
 }
 
+/**
+ * Called from PresenceHeartbeat.tsx on an interval while the matchroom page
+ * is open — bumps lastSeenAt so the waiting-pool display can tell "closed
+ * the tab" apart from "still here" (there's no websocket/live-connection
+ * layer to detect that any other way). Silent and cheap: updateMany rather
+ * than update so it's a no-op (not an error) if the caller isn't currently
+ * a RoomPlayer yet, and no revalidation — AutoRefresh's own polling already
+ * re-fetches the page on its own schedule.
+ */
+export async function heartbeatAction(): Promise<void> {
+  const user = await requireUser();
+  const room = await db.room.findFirst({ where: { status: { notIn: ["COMPLETED", "CANCELLED"] } } });
+  if (!room) return;
+  await db.roomPlayer.updateMany({
+    where: { roomId: room.id, userId: user.id },
+    data: { lastSeenAt: new Date() },
+  });
+}
+
+const CHAT_MESSAGE_MAX_LENGTH = 500;
+
+/**
+ * Room-scoped chat — no websocket layer, other viewers see a new message on
+ * their next AutoRefresh poll (a few seconds, not instant). Called directly
+ * from RoomChat.tsx rather than via a <form action>, so it can clear the
+ * input and scroll the list itself right after a successful send.
+ */
+export async function sendChatMessageAction(body: string): Promise<void> {
+  const user = await requireUser();
+  const room = await getActiveRoom();
+  const trimmed = body.trim();
+  if (!trimmed) return;
+  if (trimmed.length > CHAT_MESSAGE_MAX_LENGTH) {
+    throw new Error(`Message is too long (${CHAT_MESSAGE_MAX_LENGTH} characters max)`);
+  }
+  await db.chatMessage.create({ data: { roomId: room.id, userId: user.id, body: trimmed } });
+  revalidateMatchroom();
+}
+
 export async function setTeam(formData: FormData): Promise<void> {
   const user = await requireUser();
   const team = String(formData.get("team")) as Team;
@@ -174,6 +231,9 @@ export async function setTeam(formData: FormData): Promise<void> {
   }
   if (room.status !== "SETUP") {
     throw new Error("Teams are locked once ready-up is complete");
+  }
+  if (room.teamsLocked) {
+    throw new Error("The host has locked teams");
   }
 
   // First player onto an empty team becomes its captain. Switching teams
@@ -249,10 +309,113 @@ function generateFakeSteamId(): string {
     .padStart(17, "0");
 }
 
+/** A plausible CS2 Premier rating range, for bots' manualRating — real
+ * players' ratings run roughly 0-30,000, so bots read as a believable mix
+ * of skill levels instead of all showing no rating badge at all. */
+function randomBotRating(): number {
+  return Math.round(3000 + Math.random() * 24000);
+}
+
 // Team size isn't a configured setting anymore, but this test-mode
 // shortcut still needs *some* target to fill toward — a standard 5v5 is
 // the obvious "give me a full test match" default.
 const TEST_MODE_PLAYERS_PER_TEAM = 5;
+const TEST_MODE_COACHES_PER_TEAM = 1;
+
+/**
+ * Tops up whichever team/coach slots are still empty with placeholder bot
+ * players, up to the standard 5+1 lineup per side. Shared by the two
+ * test-mode entry points: readyUpAllAction (fill, ready everyone, and
+ * jump straight into veto) and fillTestBotsAction (fill only, so a host
+ * can eyeball a fully-populated SETUP screen before going any further).
+ */
+async function fillEmptySlotsWithBots(room: { id: string; players: { team: string; isCoach: boolean }[] }) {
+  const countA = room.players.filter((p) => p.team === "A" && !p.isCoach).length;
+  const countB = room.players.filter((p) => p.team === "B" && !p.isCoach).length;
+  const coachesA = room.players.filter((p) => p.team === "A" && p.isCoach).length;
+  const coachesB = room.players.filter((p) => p.team === "B" && p.isCoach).length;
+
+  const slots: { team: "A" | "B"; isCoach: boolean }[] = [
+    ...Array(Math.max(0, TEST_MODE_PLAYERS_PER_TEAM - countA)).fill({ team: "A", isCoach: false }),
+    ...Array(Math.max(0, TEST_MODE_PLAYERS_PER_TEAM - countB)).fill({ team: "B", isCoach: false }),
+    ...Array(Math.max(0, TEST_MODE_COACHES_PER_TEAM - coachesA)).fill({ team: "A", isCoach: true }),
+    ...Array(Math.max(0, TEST_MODE_COACHES_PER_TEAM - coachesB)).fill({ team: "B", isCoach: true }),
+  ];
+  if (slots.length === 0) return;
+
+  // Reuse bots left over from earlier test rooms (they're not tied to
+  // *this* room yet) instead of always minting new User rows — otherwise
+  // every test run permanently adds 9-10 more bot accounts.
+  const reusableBots = await db.user.findMany({
+    where: { isBot: true, roomPlayers: { none: { roomId: room.id } } },
+    take: slots.length,
+  });
+
+  let botIndex = (await db.user.count({ where: { isBot: true } })) + 1;
+  for (let i = 0; i < slots.length; i++) {
+    const slot = slots[i];
+    const bot =
+      reusableBots[i] ??
+      (await db.user.create({
+        data: {
+          steamId64: generateFakeSteamId(),
+          name: `Bot ${botIndex++}`,
+          isBot: true,
+          isPlaceholder: true,
+          manualRating: randomBotRating(),
+        },
+      }));
+    // A bot reused from before this rating existed — top it up rather than
+    // leaving it as the one player with no rating badge.
+    if (bot.manualRating === null) {
+      await db.user.update({ where: { id: bot.id }, data: { manualRating: randomBotRating() } });
+    }
+    await db.roomPlayer.create({
+      data: { roomId: room.id, userId: bot.id, team: slot.team, isCoach: slot.isCoach },
+    });
+  }
+}
+
+/**
+ * Admin-only, fires the instant Test mode is switched on in the floating
+ * debug panel — fills empty slots with bots but stops there (no ready-up,
+ * no veto) so the host can actually see what a full SETUP screen looks
+ * like instead of being dropped straight into veto.
+ */
+export async function fillTestBotsAction(): Promise<void> {
+  const user = await requireUser();
+  if (user.role !== "ADMIN") throw new Error("Admin only");
+  const room = await getActiveRoom();
+  if (room.status !== "SETUP") throw new Error("Nothing to fill right now");
+  await fillEmptySlotsWithBots(room);
+  await claimHost(room.id, user);
+  revalidateMatchroom();
+}
+
+/**
+ * The other half of the Test mode toggle — switching it off removes
+ * whatever bot players fillTestBotsAction (or readyUpAllAction) added, so
+ * the room goes back to just its real players instead of leaving bots
+ * behind. Only ever touches RoomPlayer rows for bot users (never a real
+ * player), and leaves the underlying bot User rows alone so they're still
+ * there to reuse next time Test mode goes back on.
+ */
+export async function clearTestBotsAction(): Promise<void> {
+  const user = await requireUser();
+  if (user.role !== "ADMIN") throw new Error("Admin only");
+  const room = await getActiveRoom();
+  if (room.status !== "SETUP") throw new Error("Nothing to clear right now");
+  await db.roomPlayer.deleteMany({ where: { roomId: room.id, user: { isBot: true } } });
+  // Bot User rows themselves are never deleted when they're removed from a
+  // room (fillEmptySlotsWithBots reuses them next time), so across enough
+  // test-mode cycles they'd otherwise just accumulate forever. Toggling
+  // Test mode off is a natural moment to also sweep any bot left with zero
+  // RoomPlayer rows anywhere — including ones freed up by a room getting
+  // deleted outright (see cancelMatchAction) — without touching bots still
+  // tied to a real match history.
+  await db.user.deleteMany({ where: { isBot: true, roomPlayers: { none: {} } } });
+  revalidateMatchroom();
+}
 
 export async function readyUpAllAction(): Promise<void> {
   const user = await requireUser();
@@ -266,36 +429,7 @@ export async function readyUpAllAction(): Promise<void> {
   // remaining empty slots with placeholder bot players first. Simulation
   // mode doesn't need real Steam accounts to connect, so this is safe:
   // MatchZy just spawns bots representing whatever SteamIDs are configured.
-  const countA = room.players.filter((p) => p.team === "A" && !p.isCoach).length;
-  const countB = room.players.filter((p) => p.team === "B" && !p.isCoach).length;
-  const neededA = Math.max(0, TEST_MODE_PLAYERS_PER_TEAM - countA);
-  const neededB = Math.max(0, TEST_MODE_PLAYERS_PER_TEAM - countB);
-
-  const slots: ("A" | "B")[] = [
-    ...Array(neededA).fill("A" as const),
-    ...Array(neededB).fill("B" as const),
-  ];
-
-  // Reuse bots left over from earlier test rooms (they're not tied to
-  // *this* room yet) instead of always minting new User rows — otherwise
-  // every test run permanently adds 9-10 more bot accounts.
-  const reusableBots = await db.user.findMany({
-    where: { isBot: true, roomPlayers: { none: { roomId: room.id } } },
-    take: slots.length,
-  });
-
-  let botIndex = (await db.user.count({ where: { isBot: true } })) + 1;
-  for (let i = 0; i < slots.length; i++) {
-    const team = slots[i];
-    const bot =
-      reusableBots[i] ??
-      (await db.user.create({
-        data: { steamId64: generateFakeSteamId(), name: `Bot ${botIndex++}`, isBot: true },
-      }));
-    await db.roomPlayer.create({
-      data: { roomId: room.id, userId: bot.id, team, isReady: true },
-    });
-  }
+  await fillEmptySlotsWithBots(room);
 
   await db.roomPlayer.updateMany({
     where: { roomId: room.id, team: { in: ["A", "B"] } },
@@ -441,16 +575,25 @@ export async function resetTeamsAction(): Promise<void> {
   revalidateMatchroom();
 }
 
+/** Toggles whether players can self-switch teams via setTeam — host tools
+ * (unassignPlayer, assignCaptain, assignCoach) always still work regardless,
+ * same as every other host override in this app. */
+export async function toggleTeamsLockedAction(): Promise<void> {
+  const user = await requireUser();
+  assertCanManage(user);
+  const room = await getActiveRoom();
+  await db.room.update({ where: { id: room.id }, data: { teamsLocked: !room.teamsLocked } });
+  await claimHost(room.id, user);
+  revalidateMatchroom();
+}
+
 export async function scrambleTeams(): Promise<void> {
   const user = await requireUser();
   assertCanManage(user);
   const room = await getActiveRoom();
   if (room.mode !== "SELF_SELECT") throw new Error("Scramble isn't available in captain draft mode");
 
-  const movable = room.players.filter(
-    (p) => (p.team === "A" || p.team === "B") && !p.isCaptain,
-  );
-  const shuffled = [...movable].sort(() => Math.random() - 0.5);
+  const shuffled = [...scrambleCandidates(room.players)].sort(() => Math.random() - 0.5);
   const half = Math.ceil(shuffled.length / 2);
   const teamA = shuffled.slice(0, half);
   const teamB = shuffled.slice(half);
@@ -469,7 +612,7 @@ export async function balanceTeamsAction(): Promise<void> {
   const room = await getActiveRoom();
   if (room.mode !== "SELF_SELECT") throw new Error("Balance isn't available in captain draft mode");
 
-  const onTeam = room.players.filter((p) => p.team === "A" || p.team === "B");
+  const onTeam = balanceCandidates(room.players);
   const users = await db.user.findMany({ where: { id: { in: onTeam.map((p) => p.userId) } } });
   const userById = new Map(users.map((u) => [u.id, u]));
 
@@ -534,11 +677,14 @@ export async function banMapAction(formData: FormData): Promise<void> {
   const remainingPool = fullPool.filter((m) => !bannedSoFar.has(m));
   const nextTeam: "A" | "B" = stepsSoFar.length % 2 === 0 ? "A" : "B";
 
-  const isHost = user.role === "HOST" || user.role === "ADMIN";
+  // Hosts run the lobby but aren't a veto participant — only an admin can
+  // override and act for either team here, same as a captain can only act
+  // for their own team. A host who isn't also an admin/captain can't ban.
+  const isAdmin = user.role === "ADMIN";
   const captain = room.players.find((p) => p.team === nextTeam && p.isCaptain);
   const isActingCaptain = captain?.userId === user.id;
-  if (!isHost && !isActingCaptain) {
-    throw new Error(`Only Team ${nextTeam}'s captain (or the host) can ban right now`);
+  if (!isAdmin && !isActingCaptain) {
+    throw new Error(`Only Team ${nextTeam}'s captain (or an admin) can ban right now`);
   }
 
   const next = applyBan(
@@ -548,17 +694,51 @@ export async function banMapAction(formData: FormData): Promise<void> {
     required,
   );
 
+  // No knife round — the team that DIDN'T cast this final ban gets to
+  // choose their starting side, since they didn't get the last map pick.
+  const sideChoiceTeam = next.done && !room.knifeRound ? sideChoiceTeamFromSteps(next.steps) : null;
+
   await db.veto.update({
     where: { roomId: room.id },
     data: {
       status: next.done ? "DONE" : "IN_PROGRESS",
       steps: JSON.stringify(next.steps),
       finalMapList: next.finalMapList ? JSON.stringify(next.finalMapList) : null,
+      ...(next.done ? { sideChoiceTeam, chosenSide: null } : {}),
     },
   });
   if (next.done) {
     await db.room.update({ where: { id: room.id }, data: { status: "READY" } });
   }
+  revalidateMatchroom();
+}
+
+/**
+ * The payoff for not getting the last map pick (or for winning the
+ * coin flip when there was no veto to react to) — lets that team's
+ * captain, or the host, lock in CT or T for map 1. Only meaningful when
+ * the room has no knife round; startVetoForRoom/banMapAction never set
+ * veto.sideChoiceTeam otherwise, so this always has nothing to act on
+ * there. Can be re-picked freely up until the match actually starts.
+ */
+export async function chooseSideAction(formData: FormData): Promise<void> {
+  const user = await requireUser();
+  const side = String(formData.get("side"));
+  if (side !== "CT" && side !== "T") throw new Error("Invalid side");
+
+  const room = await getActiveRoom();
+  const veto = await db.veto.findUnique({ where: { roomId: room.id } });
+  if (!veto?.sideChoiceTeam) throw new Error("No side choice is pending");
+
+  // Same rule as banMapAction: hosts don't get a veto vote, only admins do.
+  const isAdmin = user.role === "ADMIN";
+  const captain = room.players.find((p) => p.team === veto.sideChoiceTeam && p.isCaptain);
+  const isActingCaptain = captain?.userId === user.id;
+  if (!isAdmin && !isActingCaptain) {
+    throw new Error(`Only Team ${veto.sideChoiceTeam}'s captain (or an admin) can choose the side`);
+  }
+
+  await db.veto.update({ where: { roomId: room.id }, data: { chosenSide: side } });
   revalidateMatchroom();
 }
 
@@ -603,10 +783,12 @@ export async function draftPickAction(formData: FormData): Promise<void> {
   const lastPicker = stepsSoFar.length > 0 ? stepsSoFar[stepsSoFar.length - 1].team : null;
   const nextTeam = computeNextTeam(lastPicker, "A");
 
-  const isHost = user.role === "HOST" || user.role === "ADMIN";
+  // Same rule as the map veto: a host isn't a draft participant, so only
+  // an admin can override and pick for either team.
+  const isAdmin = user.role === "ADMIN";
   const actingCaptain = nextTeam === "A" ? captainA : captainB;
-  if (!isHost && actingCaptain.userId !== user.id) {
-    throw new Error(`Only Team ${nextTeam}'s captain (or the host) can pick right now`);
+  if (!isAdmin && actingCaptain.userId !== user.id) {
+    throw new Error(`Only Team ${nextTeam}'s captain (or an admin) can pick right now`);
   }
 
   const pool = room.players.filter((p) => p.team === "UNASSIGNED").map((p) => p.id);
@@ -664,7 +846,11 @@ export async function startMatchAction(): Promise<void> {
   // 32-bit signed ceiling (~2.147bn) until 2038, and is precise enough
   // that two matches starting the same second is a non-issue in practice.
   const matchzyMatchId = String(Math.floor(Date.now() / 1000));
-  const configJson = buildMatchConfig({ room, roomPlayers: room.players, mapList, matchzyMatchId });
+  const sideChoice =
+    room.veto?.sideChoiceTeam && room.veto?.chosenSide
+      ? { team: room.veto.sideChoiceTeam as "A" | "B", side: room.veto.chosenSide as "CT" | "T" }
+      : null;
+  const configJson = buildMatchConfig({ room, roomPlayers: room.players, mapList, matchzyMatchId, sideChoice });
 
   const match = await db.match.create({
     data: {

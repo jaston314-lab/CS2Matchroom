@@ -33,7 +33,14 @@ export async function GET(request: NextRequest) {
   const existing = await db.user.findUnique({ where: { steamId64 } });
   const session = await getSession();
 
-  if (existing) {
+  // A User row can exist without anyone ever having actually registered:
+  // demoImport.ts and bot-simulation matches both create isPlaceholder:true
+  // rows for SteamIDs that show up in a demo/match, just to attribute
+  // historical stats to them. That's not the same as being an invited
+  // member — route them through the invite flow like any new SteamID
+  // (submitInviteCode below promotes the placeholder to a real member on
+  // success instead of creating a duplicate).
+  if (existing && !existing.isPlaceholder) {
     const profile = await fetchSteamProfile(steamId64);
     await db.user.update({
       where: { steamId64 },

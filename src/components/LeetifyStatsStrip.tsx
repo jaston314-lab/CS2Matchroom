@@ -25,7 +25,7 @@ export function LeetifyStatsStrip({
   compact?: boolean;
 }) {
   if (!stats) {
-    return <span className="text-xs text-neutral-600">No Leetify data</span>;
+    return <span className="text-xs text-muted/70">No Leetify data</span>;
   }
 
   const swingPositive = stats.swingPct >= 0;
@@ -34,7 +34,7 @@ export function LeetifyStatsStrip({
     <div
       className={
         compact
-          ? "inline-grid grid-cols-7 divide-x divide-neutral-800"
+          ? "inline-grid grid-cols-7 divide-x divide-line"
           : "inline-grid grid-cols-7 gap-x-3"
       }
       title={tooltipFor(stats)}
@@ -65,7 +65,7 @@ export function LeetifyRatingChip({ stats }: { stats: LeetifyMatchStats | null }
   if (!stats) return null;
   return (
     <span
-      className="shrink-0 rounded bg-neutral-800/80 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-neutral-200"
+      className="shrink-0 rounded bg-input/80 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-ink"
       title={tooltipFor(stats)}
     >
       {stats.rating.toFixed(2)}
@@ -87,11 +87,11 @@ function Cell({
   return (
     <div className={`text-center ${compact ? "min-w-[2.15rem] px-1" : "min-w-[3.25rem]"}`}>
       <p
-        className={`tabular-nums whitespace-nowrap ${compact ? "text-[11px]" : "text-sm"} ${className ?? "text-neutral-200"}`}
+        className={`tabular-nums whitespace-nowrap ${compact ? "text-[11px]" : "text-sm"} ${className ?? "text-ink"}`}
       >
         {value}
       </p>
-      <p className={`uppercase tracking-wide text-neutral-500 ${compact ? "text-[8px]" : "text-[10px]"}`}>
+      <p className={`uppercase tracking-wide text-muted ${compact ? "text-[8px]" : "text-[10px]"}`}>
         {label}
       </p>
     </div>

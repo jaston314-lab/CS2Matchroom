@@ -100,10 +100,41 @@ describe("buildMatchConfig", () => {
     expect(config.map_sides).toEqual(["team1_ct", "team2_ct", "team1_ct"]);
   });
 
+  it("uses the winning team's actual side choice for map 1, alternating from there, when there's no knife round", () => {
+    const noKnife = { ...baseInput, room: { ...baseInput.room, format: "BO3" as const, knifeRound: false }, mapList: ["de_mirage", "de_inferno", "de_nuke"] };
+
+    // Team A (team1) chose CT — same as the old fixed default.
+    expect(
+      buildMatchConfig({ ...noKnife, sideChoice: { team: "A", side: "CT" } }).map_sides,
+    ).toEqual(["team1_ct", "team2_ct", "team1_ct"]);
+
+    // Team A chose T instead — team2 (Team B) starts CT on map 1, flipping every map after.
+    expect(
+      buildMatchConfig({ ...noKnife, sideChoice: { team: "A", side: "T" } }).map_sides,
+    ).toEqual(["team2_ct", "team1_ct", "team2_ct"]);
+
+    // Team B chose CT — team2 starts CT on map 1, same result as Team A choosing T.
+    expect(
+      buildMatchConfig({ ...noKnife, sideChoice: { team: "B", side: "CT" } }).map_sides,
+    ).toEqual(["team2_ct", "team1_ct", "team2_ct"]);
+
+    // Team B chose T — team1 (Team A) starts CT on map 1.
+    expect(
+      buildMatchConfig({ ...noKnife, sideChoice: { team: "B", side: "T" } }).map_sides,
+    ).toEqual(["team1_ct", "team2_ct", "team1_ct"]);
+  });
+
   it("throws when the resolved map list doesn't match the format's required count", () => {
     expect(() =>
       buildMatchConfig({ ...baseInput, room: { ...baseInput.room, format: "BO3" }, mapList: ["de_mirage"] }),
     ).toThrow(/requires 3/);
+  });
+
+  it("forces team auto-assign and player auto-ready, so no manual choose-team menu or .ready is needed", () => {
+    const config = buildMatchConfig(baseInput);
+    const cvars = config.cvars as Record<string, string>;
+    expect(cvars.mp_force_assign_teams).toBe("1");
+    expect(cvars.matchzy_autoready_enabled).toBe("1");
   });
 
   it("omits simulation fields by default, includes them when the room has simulation on", () => {

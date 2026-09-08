@@ -11,7 +11,7 @@ import { cancelMatchAction } from "./actions";
  * deleted outright rather than left behind as a "cancelled" entry in the
  * Players Lounge history.
  */
-export function CancelMatchButton() {
+export function CancelMatchButton({ fullWidth = false }: { fullWidth?: boolean }) {
   function handleClick(e: MouseEvent<HTMLButtonElement>) {
     if (!window.confirm("Cancel this match? Teams and veto progress will be lost.")) {
       e.preventDefault();
@@ -19,10 +19,12 @@ export function CancelMatchButton() {
   }
 
   return (
-    <form action={cancelMatchAction}>
+    <form action={cancelMatchAction} className={fullWidth ? "w-full" : undefined}>
       <button
         onClick={handleClick}
-        className="rounded-lg border border-red-900 text-red-300 px-3 py-1.5 text-sm hover:border-red-700 transition-colors"
+        className={`rounded-lg bg-red-950/50 text-red-300 hover:bg-red-900/60 transition-colors ${
+          fullWidth ? "w-full py-2.5 text-sm font-bold" : "px-3 py-1.5 text-sm"
+        }`}
       >
         Cancel match
       </button>

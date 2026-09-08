@@ -32,45 +32,35 @@ export function NavLinks({ user }: { user: NavUser | null }) {
 
   const links = (
     <>
-      <Link
-        href="/matchroom"
-        onClick={() => setOpen(false)}
-        className="text-neutral-300 hover:text-white transition-colors"
-      >
+      <Link href="/matchroom" onClick={() => setOpen(false)} className="text-muted hover:text-white transition-colors">
         Matchroom
       </Link>
-      <Link
-        href="/lounge"
-        onClick={() => setOpen(false)}
-        className="text-neutral-300 hover:text-white transition-colors"
-      >
+      <Link href="/lounge" onClick={() => setOpen(false)} className="text-muted hover:text-white transition-colors">
         Players Lounge
       </Link>
       {user.role === "ADMIN" && (
-        <Link
-          href="/admin/users"
-          onClick={() => setOpen(false)}
-          className="text-neutral-300 hover:text-white transition-colors"
-        >
+        <Link href="/admin/users" onClick={() => setOpen(false)} className="text-muted hover:text-white transition-colors">
           Admin
         </Link>
       )}
-      <Link
-        href="/profile"
-        onClick={() => setOpen(false)}
-        className="flex items-center gap-2 text-neutral-300 hover:text-white transition-colors"
-      >
-        {user.avatarUrl && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={user.avatarUrl} alt="" className="w-6 h-6 rounded-full ring-1 ring-neutral-700" />
-        )}
-        {user.name}
-      </Link>
-      <form action="/api/auth/logout" method="POST">
-        <button type="submit" className="text-neutral-500 hover:text-white transition-colors cursor-pointer">
-          Sign out
-        </button>
-      </form>
+      <div className="flex items-center gap-2 border-l border-line pl-4 sm:pl-5 ml-1">
+        <Link
+          href="/profile"
+          onClick={() => setOpen(false)}
+          className="flex items-center gap-2 text-muted hover:text-white transition-colors"
+        >
+          {user.avatarUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={user.avatarUrl} alt="" className="w-8 h-8 rounded-full border border-line" />
+          )}
+          {user.name}
+        </Link>
+        <form action="/api/auth/logout" method="POST">
+          <button type="submit" className="text-muted hover:text-white transition-colors cursor-pointer">
+            Sign out
+          </button>
+        </form>
+      </div>
     </>
   );
 
@@ -86,7 +76,7 @@ export function NavLinks({ user }: { user: NavUser | null }) {
           onClick={() => setOpen((o) => !o)}
           aria-label={open ? "Close menu" : "Open menu"}
           aria-expanded={open}
-          className="flex items-center justify-center w-9 h-9 rounded-lg border border-neutral-700 text-neutral-300 hover:border-blue-500 hover:text-white transition-colors"
+          className="flex items-center justify-center w-9 h-9 rounded-lg border border-line text-muted hover:border-blue-500 hover:text-white transition-colors"
         >
           {open ? "✕" : "☰"}
         </button>
@@ -94,7 +84,7 @@ export function NavLinks({ user }: { user: NavUser | null }) {
           <>
             {/* Full-screen tap-to-close backdrop, behind the panel */}
             <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} aria-hidden="true" />
-            <nav className="absolute right-0 top-12 z-20 w-56 rounded-xl border border-neutral-800 bg-neutral-950 shadow-xl p-3 flex flex-col gap-3 text-sm">
+            <nav className="absolute right-0 top-12 z-20 w-56 rounded-xl border border-line bg-panel shadow-xl p-3 flex flex-col gap-3 text-sm">
               {links}
             </nav>
           </>

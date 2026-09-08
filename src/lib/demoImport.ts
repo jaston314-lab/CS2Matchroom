@@ -157,11 +157,11 @@ export interface DemoImportResult {
  * attachDemoToMatch below instead, which links stats to the match that
  * already exists rather than fabricating a new room.
  *
- * Players who aren't already app members are created as isBot:true users
- * (real Steam name/id, just excluded from the Players Lounge leaderboard
- * and Admin > Users the same way test-mode bots already are) — reusing
- * that flag is a shortcut rather than a perfect semantic fit, but it gets
- * the exclusion behavior for free.
+ * Players who aren't already app members are created as isPlaceholder:true
+ * users (real Steam name/id — isBot stays false, they're real people, just
+ * not yet registered) — excluded from the Players Lounge leaderboard and
+ * Admin > Users until they actually log in with Steam, at which point
+ * submitInviteCode promotes this same row instead of creating a duplicate.
  */
 export async function importDemoFile(pathOrBuffer: string | Buffer): Promise<DemoImportResult> {
   const raw = typeof pathOrBuffer === "string" ? fs.readFileSync(pathOrBuffer) : pathOrBuffer;
@@ -208,7 +208,7 @@ export async function importDemoFile(pathOrBuffer: string | Buffer): Promise<Dem
       let user = existingBySteamId.get(p.steamId64);
       if (!user) {
         user = await tx.user.create({
-          data: { steamId64: p.steamId64, name: p.name, isBot: true }, // not an app member — see doc comment above
+          data: { steamId64: p.steamId64, name: p.name, isPlaceholder: true }, // not an app member — see doc comment above
         });
       }
 
@@ -248,9 +248,11 @@ export async function importDemoFile(pathOrBuffer: string | Buffer): Promise<Dem
  * roster by steamId64 (using the team they were actually assigned in the
  * lobby, not the demo's own team_num split, which isn't meaningful
  * post-match since sides swap at half). A parsed player with no matching
- * roster entry (e.g. a MatchZy-simulated bot) still gets a stats row,
- * under a lightweight isBot:true placeholder user, using the demo's own
- * team split as a fallback.
+ * roster entry (e.g. a MatchZy-simulated bot, or conceivably a real sub who
+ * wasn't in the app roster) still gets a stats row, under a lightweight
+ * isPlaceholder:true user — isBot stays false since a demo alone can't
+ * actually tell a synthetic bot apart from a real unregistered player —
+ * using the demo's own team split as a fallback.
  *
  * Idempotent per (matchId, userId) — upserts rather than creates, so a
  * retried upload just overwrites with the same numbers. Note: for a BO3+
@@ -269,24 +271,24 @@ export async function attachDemoToMatch(matchId: string, raw: Buffer): Promise<P
 
   const rosterBySteamId = new Map(match.room.players.map((rp) => [rp.user.steamId64, rp]));
   const unmatched = players.filter((p) => !rosterBySteamId.has(p.steamId64));
-  const newBotUsers =
+  const newPlaceholderUsers =
     unmatched.length > 0
       ? await Promise.all(
           unmatched.map((p) =>
             db.user.upsert({
               where: { steamId64: p.steamId64 },
               update: {},
-              create: { steamId64: p.steamId64, name: p.name, isBot: true },
+              create: { steamId64: p.steamId64, name: p.name, isPlaceholder: true },
             }),
           ),
         )
       : [];
-  const botUserBySteamId = new Map(newBotUsers.map((u) => [u.steamId64, u]));
+  const placeholderUserBySteamId = new Map(newPlaceholderUsers.map((u) => [u.steamId64, u]));
 
   await db.$transaction(
     players.map((p) => {
       const rosterEntry = rosterBySteamId.get(p.steamId64);
-      const userId = rosterEntry?.userId ?? botUserBySteamId.get(p.steamId64)!.id;
+      const userId = rosterEntry?.userId ?? placeholderUserBySteamId.get(p.steamId64)!.id;
       const team = rosterEntry?.team === "A" || rosterEntry?.team === "B" ? rosterEntry.team : p.team;
       return db.matchPlayerStats.upsert({
         where: { matchId_userId: { matchId, userId } },

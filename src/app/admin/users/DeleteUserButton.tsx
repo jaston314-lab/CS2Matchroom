@@ -1,24 +1,24 @@
 "use client";
 
 import type { MouseEvent } from "react";
-import { deleteGameAction } from "./actions";
+import { deleteUserAction } from "./actions";
 
-export function DeleteGameButton({ roomId }: { roomId: string }) {
+export function DeleteUserButton({ userId, name }: { userId: string; name: string }) {
   function handleClick(e: MouseEvent<HTMLButtonElement>) {
-    if (!window.confirm("Delete this game? This can't be undone.")) {
+    if (!window.confirm(`Remove ${name}'s account? They'll need a new invite code to join again.`)) {
       e.preventDefault();
     }
   }
 
   return (
-    <form action={deleteGameAction}>
-      <input type="hidden" name="roomId" value={roomId} />
+    <form action={deleteUserAction}>
+      <input type="hidden" name="userId" value={userId} />
       <button
         onClick={handleClick}
-        title="Delete game"
+        title="Remove account"
         className="rounded border border-line text-muted hover:text-red-300 hover:border-red-800 px-2 py-1 text-xs transition-colors"
       >
-        Delete
+        Remove
       </button>
     </form>
   );

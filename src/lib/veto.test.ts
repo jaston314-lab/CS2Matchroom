@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { applyBan, startVeto } from "./veto";
+import { applyBan, startVeto, sideChoiceTeamFromSteps } from "./veto";
+import type { VetoStep } from "@/lib/types";
 
 describe("veto", () => {
   it("resolves immediately when the pool already matches the required count", () => {
@@ -41,5 +42,26 @@ describe("veto", () => {
     state = applyBan(state, "A", "a", 1);
     expect(state.done).toBe(true);
     expect(() => applyBan(state, "B", "b", 1)).toThrow(/already complete/);
+  });
+});
+
+describe("sideChoiceTeamFromSteps", () => {
+  it("returns null when the veto resolved with zero bans — caller should coin-flip instead", () => {
+    expect(sideChoiceTeamFromSteps([])).toBeNull();
+  });
+
+  it("gives side choice to the opponent of whoever cast the last ban", () => {
+    expect(sideChoiceTeamFromSteps([{ team: "A", map: "de_mirage", action: "ban" }])).toBe("B");
+    expect(sideChoiceTeamFromSteps([{ team: "B", map: "de_mirage", action: "ban" }])).toBe("A");
+  });
+
+  it("only looks at the last step, not who started the veto", () => {
+    const steps: VetoStep[] = [
+      { team: "A", map: "de_mirage", action: "ban" },
+      { team: "B", map: "de_inferno", action: "ban" },
+      { team: "A", map: "de_nuke", action: "ban" },
+    ];
+    // A cast the last ban here, so B gets the side choice.
+    expect(sideChoiceTeamFromSteps(steps)).toBe("B");
   });
 });
